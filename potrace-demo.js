@@ -42,6 +42,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Toggle controls
     const invertColorsToggle = document.getElementById('invertColorsToggle');
+    const invertSourceToggle = document.getElementById('invertSourceToggle');
     
     // State variables
     let originalImage = null;
@@ -58,6 +59,7 @@ document.addEventListener('DOMContentLoaded', () => {
         blurRadius: 1,
         edgeSensitivity: 1.8,
         invertColors: false,
+        invertSource: false,
         brightness: 0,
         contrast: 0,
         brilliance: 0,
@@ -75,7 +77,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const controlInputs = [
         thresholdSlider, smoothingSlider, lineThicknessSlider, 
         blurRadiusSlider, edgeSensitivitySlider, brightnessSlider,
-        contrastSlider, brillianceSlider, shadowsSlider, invertColorsToggle
+        contrastSlider, brillianceSlider, shadowsSlider, invertColorsToggle,
+        invertSourceToggle
     ];
     
     for (const input of controlInputs) {
@@ -93,6 +96,10 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         } else if (input.type === 'checkbox') {
             input.addEventListener('change', () => {
+                // Update source image immediately if it's the invert source toggle
+                if (input.id === 'invertSourceToggle') {
+                    displayOriginalImage();
+                }
                 updateStatus('Updating...');
                 debouncedProcessImage();
             });
@@ -135,7 +142,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (originalImage) {
                 processImage();
             }
-        }, 100);
+        }, 200);
     }
     
     /**
@@ -152,6 +159,7 @@ document.addEventListener('DOMContentLoaded', () => {
         brillianceSlider.value = defaultSettings.brilliance;
         shadowsSlider.value = defaultSettings.shadows;
         invertColorsToggle.checked = defaultSettings.invertColors;
+        invertSourceToggle.checked = defaultSettings.invertSource;
         
         updateThresholdValue();
         updateSmoothingValue();
@@ -224,9 +232,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const contrast = Number.parseInt(contrastSlider.value, 10);
         const brilliance = Number.parseInt(brillianceSlider.value, 10);
         const shadows = Number.parseInt(shadowsSlider.value, 10);
+        const invertSource = invertSourceToggle.checked;
         
-        // If no adjustments, just show the original
-        if (brightness === 0 && contrast === 0 && brilliance === 0 && shadows === 0) {
+        // If no adjustments and no inversion, just show the original
+        if (brightness === 0 && contrast === 0 && brilliance === 0 && shadows === 0 && !invertSource) {
             originalPreview.innerHTML = '';
             originalPreview.appendChild(originalImage);
             return;
@@ -255,6 +264,11 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // Apply all adjustments
         applyImageAdjustments(adjustedData.data, brightness, contrast, brilliance, shadows);
+        
+        // Apply inversion if enabled
+        if (invertSource) {
+            invertImageData(adjustedData.data);
+        }
         
         // Put adjusted data on canvas
         ctx.putImageData(adjustedData, 0, 0);
@@ -332,6 +346,20 @@ document.addEventListener('DOMContentLoaded', () => {
             data[i + 1] = Math.min(255, Math.max(0, Math.round(g)));
             data[i + 2] = Math.min(255, Math.max(0, Math.round(b)));
             // Don't modify alpha
+        }
+    }
+    
+    /**
+     * Invert image pixel data
+     * @param {Uint8ClampedArray} data - Image pixel data
+     */
+    function invertImageData(data) {
+        for (let i = 0; i < data.length; i += 4) {
+            // Invert RGB values (not alpha)
+            data[i] = 255 - data[i];         // R
+            data[i + 1] = 255 - data[i + 1]; // G
+            data[i + 2] = 255 - data[i + 2]; // B
+            // Alpha (i + 3) remains unchanged
         }
     }
     
@@ -438,7 +466,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 
                 // Set the fill color based on invert setting
-                const fillColor = invertColorsToggle.checked ? 'black' : 'white';
+                const fillColor = invertColorsToggle.checked ? 'white' : 'black';
                 
                 // Add paths to clean SVG
                 for (const path of paths) {
@@ -556,6 +584,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const blurRadius = Number.parseFloat(blurRadiusSlider.value);
             const edgeSensitivity = Number.parseFloat(edgeSensitivitySlider.value);
             const invertColors = invertColorsToggle.checked;
+            const invertSource = invertSourceToggle.checked;
             const brightness = Number.parseInt(brightnessSlider.value, 10);
             const contrast = Number.parseInt(contrastSlider.value, 10);
             const brilliance = Number.parseInt(brillianceSlider.value, 10);
@@ -582,6 +611,11 @@ document.addEventListener('DOMContentLoaded', () => {
             // Apply all image adjustments
             if (brightness !== 0 || contrast !== 0 || brilliance !== 0 || shadows !== 0) {
                 applyImageAdjustments(adjustedData.data, brightness, contrast, brilliance, shadows);
+            }
+            
+            // Apply source inversion if enabled
+            if (invertSource) {
+                invertImageData(adjustedData.data);
             }
             
             // Put the adjusted data on the canvas
