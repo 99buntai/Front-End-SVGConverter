@@ -6,23 +6,25 @@
     <title>Image to SVG Line Art Playground</title>
     <style>
         body {
-            font-family: "Segoe UI", Arial, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
             max-width: 1000px;
             margin: 0 auto;
-            padding: 20px;
+            padding: 15px;
             color: #333;
+            font-size: 16px;
         }
         h1 {
             text-align: center;
-            margin-bottom: 25px;
+            margin-bottom: 20px;
             color: #4e77cc;
+            font-size: 24px;
         }
         .upload-container {
             border: 2px dashed #ccc;
             border-radius: 10px;
-            padding: 30px;
+            padding: 20px;
             text-align: center;
-            margin-bottom: 25px;
+            margin-bottom: 20px;
             cursor: pointer;
             transition: all 0.2s ease;
             background-color: #f9f9f9;
@@ -33,55 +35,77 @@
         }
         .upload-container p {
             margin: 0;
-            font-size: 17px;
+            font-size: 16px;
             color: #666;
         }
         .preview-container {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 20px;
-            margin-top: 25px;
-            margin-bottom: 25px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-areas: 
+                "original original"
+                "lineart silhouette";
+            gap: 10px;
+            margin: 15px 0;
         }
-        .preview-box {
-            flex: 1;
-            min-width: 300px;
+        .preview-panel.original {
+            grid-area: original;
+        }
+        .preview-panel.lineart {
+            grid-area: lineart;
+        }
+        .preview-panel.silhouette {
+            grid-area: silhouette;
+        }
+        .preview-panel {
             border: 1px solid #ddd;
             border-radius: 8px;
-            padding: 15px;
             background-color: white;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+            box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+            overflow: hidden;
+            position: relative;
         }
-        .preview-flex {
-            display: flex;
-            flex-direction: column;
-            gap: 15px;
-            flex: 2;
-        }
-        .svg-previews {
-            display: flex;
-            gap: 15px;
-            flex-wrap: wrap;
-        }
-        .svg-preview {
-            flex: 1;
-            min-width: 250px;
-            border: 1px solid #ddd;
-            border-radius: 8px;
-            padding: 15px;
-            background-color: white;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.05);
-        }
-        .preview-box h3, .svg-preview h3 {
-            margin-top: 0;
-            padding-bottom: 10px;
-            border-bottom: 1px solid #eee;
+        .preview-panel h3 {
+            margin: 0;
+            padding: 6px 10px;
+            background-color: #f7f7f7;
             color: #4e77cc;
+            font-size: 12px;
             font-weight: 500;
+            border-bottom: 1px solid #eee;
+            text-align: center;
+        }
+        .preview-content {
+            height: 150px;
+            padding: 5px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+        .original .preview-content {
+            height: 160px;
+        }
+        .preview-panel button {
+            position: absolute;
+            bottom: 5px;
+            right: 5px;
+            padding: 4px 8px;
+            font-size: 10px;
+            background-color: #4e77cc;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            opacity: 0.8;
+            min-width: 0;
+            width: auto;
+        }
+        .preview-panel button:hover {
+            opacity: 1;
         }
         img, svg {
             max-width: 100%;
-            max-height: 300px;
+            max-height: 250px;
             display: block;
             margin: 0 auto;
             border-radius: 4px;
@@ -90,62 +114,69 @@
             background-color: #f9f9f9;
             border: 1px solid #ddd;
             border-radius: 8px;
-            padding: 20px;
-            margin: 20px 0;
+            padding: 15px;
+            margin: 15px 0;
+        }
+        .controls-group {
+            margin-bottom: 15px;
         }
         .controls-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-            gap: 15px;
+            grid-template-columns: 1fr;
+            gap: 6px;
         }
         .control-item {
-            margin-bottom: 15px;
+            margin-bottom: 6px;
         }
         .checkbox-label {
             display: flex;
             align-items: center;
             cursor: pointer;
-            margin-bottom: 10px;
             user-select: none;
             background-color: #f0f5ff;
-            padding: 10px;
+            padding: 8px 10px;
             border-radius: 5px;
             border: 1px solid #e0e6f5;
+            font-size: 14px;
+            margin-bottom: 0;
         }
         .checkbox-label input {
-            margin-right: 8px;
-            width: 16px;
-            height: 16px;
+            margin-right: 10px;
+            width: 18px;
+            height: 18px;
         }
         .slider-control {
             display: flex;
             flex-direction: column;
             background-color: white;
-            padding: 12px;
+            padding: 8px 10px;
             border-radius: 6px;
             box-shadow: 0 1px 3px rgba(0,0,0,0.05);
             border: 1px solid #eee;
+            margin-bottom: 4px;
         }
         .slider-label {
             display: flex;
             justify-content: space-between;
-            margin-bottom: 5px;
+            margin-bottom: 2px;
             font-weight: 500;
+            font-size: 14px;
         }
         .slider-label span:last-child {
             background-color: #4e77cc;
             color: white;
             border-radius: 3px;
             padding: 1px 6px;
-            font-size: 13px;
+            font-size: 12px;
         }
         input[type="range"] {
             width: 100%;
             height: 6px;
             -webkit-appearance: none;
             background: #ddd;
-            border-radius: 3px;
+            border-radius: 4px;
             outline: none;
+            margin: 6px 0 4px 0;
         }
         input[type="range"]::-webkit-slider-thumb {
             -webkit-appearance: none;
@@ -157,7 +188,7 @@
         }
         .button-container {
             display: flex;
-            justify-content: center;
+            flex-direction: column;
             gap: 10px;
             margin-top: 15px;
         }
@@ -165,12 +196,13 @@
             background: #4e77cc;
             color: white;
             border: none;
-            border-radius: 5px;
-            padding: 10px 18px;
+            border-radius: 8px;
+            padding: 12px 18px;
             cursor: pointer;
             font-weight: 500;
             transition: background 0.2s;
-            min-width: 120px;
+            font-size: 16px;
+            width: 100%;
         }
         button:hover {
             background: #3a5da0;
@@ -183,34 +215,115 @@
             display: none;
         }
         .actions {
-            margin-top: 15px;
-            text-align: center;
+            margin-top: 12px;
         }
         .status-indicator {
             text-align: center;
             margin: 10px 0;
             font-style: italic;
             color: #888;
-            height: 20px;
+            min-height: 20px;
         }
         .processing {
             color: #4e77cc;
         }
         .info-text {
-            font-size: 13px;
-            color: #777;
-            margin-top: 5px;
+            font-size: 11px;
+            color: #888;
+            margin-top: 1px;
+            line-height: 1.2;
         }
         .section-divider {
-            margin: 20px 0;
+            margin: 15px 0;
             border-top: 1px dashed #ddd;
             padding-top: 5px;
         }
         .section-title {
             font-weight: 500;
             color: #4e77cc;
+            margin-bottom: 12px;
+            font-size: 16px;
+        }
+        .tab-buttons {
+            display: flex;
             margin-bottom: 15px;
-            font-size: 18px;
+            border-bottom: 1px solid #ddd;
+        }
+        .tab-button {
+            background-color: #f0f0f0;
+            border: none;
+            padding: 10px 15px;
+            cursor: pointer;
+            flex: 1;
+            text-align: center;
+            font-weight: 500;
+            color: #666;
+            border-radius: 5px 5px 0 0;
+        }
+        .tab-button.active {
+            background-color: #4e77cc;
+            color: white;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        
+        @media (min-width: 600px) {
+            .preview-container {
+                grid-template-columns: repeat(3, 1fr);
+            }
+            
+            .preview-content {
+                height: 150px;
+            }
+        }
+        
+        @media (min-width: 768px) {
+            body {
+                padding: 20px;
+                font-size: 16px;
+            }
+            h1 {
+                font-size: 28px;
+                margin-bottom: 25px;
+            }
+            .preview-container {
+                grid-template-columns: repeat(3, 1fr);
+                grid-template-areas: "original lineart silhouette";
+            }
+            
+            .preview-content, .original .preview-content {
+                height: 200px;
+                padding: 10px;
+            }
+            
+            .preview-panel h3 {
+                padding: 10px 15px;
+                font-size: 16px;
+                text-align: left;
+            }
+            
+            .preview-panel button {
+                padding: 8px 12px;
+                font-size: 14px;
+                bottom: 8px;
+                right: 8px;
+            }
+            .controls-grid {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 15px;
+            }
+            .button-container {
+                flex-direction: row;
+                justify-content: center;
+            }
+            button {
+                width: auto;
+                min-width: 120px;
+            }
         }
     </style>
 </head>
@@ -222,150 +335,149 @@
         <input type="file" id="fileInput" accept="image/*">
     </div>
     
-    <!-- Preview section first -->
+    <!-- Preview section with compact layout for mobile -->
     <div class="preview-container">
-        <div class="preview-box">
-            <h3>Original Image</h3>
-            <div id="originalPreview"></div>
+        <div class="preview-panel original">
+            <h3>Original</h3>
+            <div id="originalPreview" class="preview-content"></div>
         </div>
         
-        <div class="preview-flex">
-            <div class="svg-previews">
-                <div class="svg-preview">
-                    <h3>SVG Line Art</h3>
-                    <div id="svgPreview"></div>
-                    <div class="actions">
-                        <button id="downloadBtn" disabled>Download Line Art</button>
-                    </div>
-                </div>
-                
-                <div class="svg-preview">
-                    <h3>SVG Silhouette</h3>
-                    <div id="silhouettePreview"></div>
-                    <div class="actions">
-                        <button id="downloadSilhouetteBtn" disabled>Download Silhouette</button>
-                    </div>
-                </div>
-            </div>
+        <div class="preview-panel lineart">
+            <h3>Line Art</h3>
+            <div id="svgPreview" class="preview-content"></div>
+            <button id="downloadBtn" disabled>Download</button>
+        </div>
+        
+        <div class="preview-panel silhouette">
+            <h3>Silhouette</h3>
+            <div id="silhouettePreview" class="preview-content"></div>
+            <button id="downloadSilhouetteBtn" disabled>Download</button>
         </div>
     </div>
     
     <!-- Controls section after previews -->
     <div class="controls">
-        <div class="section-title">Basic Controls</div>
-        <div class="controls-grid">
-            <div class="control-item">
-                <div class="slider-control">
-                    <div class="slider-label">
-                        <span>Edge Threshold</span>
-                        <span id="thresholdValue">120</span>
+        <div class="tab-buttons">
+            <button class="tab-button active" data-tab="basic">Vector Parameter</button>
+            <button class="tab-button" data-tab="image">Image Parameter</button>
+        </div>
+        
+        <!-- Vector Parameter Tab (renamed from Basic) -->
+        <div id="basic-tab" class="tab-content active">
+            <div class="controls-group">
+                <div class="controls-grid">
+                    <div class="control-item">
+                        <div class="slider-control">
+                            <div class="slider-label">
+                                <span>Edge Threshold</span>
+                                <span id="thresholdValue">120</span>
+                            </div>
+                            <input type="range" id="thresholdSlider" min="0" max="255" value="120">
+                            <div class="info-text">Lower values detect more edges</div>
+                        </div>
                     </div>
-                    <input type="range" id="thresholdSlider" min="0" max="255" value="120">
-                    <div class="info-text">Lower values detect more edges</div>
-                </div>
-            </div>
-            
-            <div class="control-item">
-                <div class="slider-control">
-                    <div class="slider-label">
-                        <span>Line Smoothing</span>
-                        <span id="smoothingValue">80</span>
+                    
+                    <div class="control-item">
+                        <div class="slider-control">
+                            <div class="slider-label">
+                                <span>Blur Radius</span>
+                                <span id="blurRadiusValue">1</span>
+                            </div>
+                            <input type="range" id="blurRadiusSlider" min="0.5" max="5" step="0.2" value="1">
+                            <div class="info-text">Reduces noise before processing</div>
+                        </div>
                     </div>
-                    <input type="range" id="smoothingSlider" min="0" max="100" value="80">
-                    <div class="info-text">Higher values smoother lines</div>
-                </div>
-            </div>
-            
-            <div class="control-item">
-                <div class="slider-control">
-                    <div class="slider-label">
-                        <span>Line Thickness</span>
-                        <span id="lineThicknessValue">3</span>
+                    
+                    <div class="control-item">
+                        <div class="slider-control">
+                            <div class="slider-label">
+                                <span>Edge Sensitivity</span>
+                                <span id="edgeSensitivityValue">1.8</span>
+                            </div>
+                            <input type="range" id="edgeSensitivitySlider" min="0.8" max="5" step="0.1" value="1.8">
+                            <div class="info-text">Affects detail level in both modes</div>
+                        </div>
                     </div>
-                    <input type="range" id="lineThicknessSlider" min="2" max="7" step="0.5" value="3">
-                </div>
-            </div>
-            
-            <div class="control-item">
-                <div class="checkbox-label">
-                    <input type="checkbox" id="invertColorsToggle">
-                    <span>White on black background</span>
+                    
+                    <div class="control-item">
+                        <div class="slider-control">
+                            <div class="slider-label">
+                                <span>Line Thickness</span>
+                                <span id="lineThicknessValue">3</span>
+                            </div>
+                            <input type="range" id="lineThicknessSlider" min="2" max="7" step="0.5" value="3">
+                            <div class="info-text">Only affects Line Art output</div>
+                        </div>
+                    </div>
+                    
+                    <div class="control-item">
+                        <div class="slider-control">
+                            <div class="slider-label">
+                                <span>Line Smoothing</span>
+                                <span id="smoothingValue">80</span>
+                            </div>
+                            <input type="range" id="smoothingSlider" min="0" max="100" value="80">
+                            <div class="info-text">Controls curve smoothness in both modes</div>
+                        </div>
+                    </div>
+                    
+                    <div class="control-item">
+                        <div class="checkbox-label">
+                            <input type="checkbox" id="invertColorsToggle">
+                            <span>Invert color</span>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
         
-        <div class="section-divider"></div>
-        <div class="section-title">Image Adjustment</div>
-        
-        <div class="controls-grid">
-            <div class="control-item">
-                <div class="slider-control">
-                    <div class="slider-label">
-                        <span>Brightness</span>
-                        <span id="brightnessValue">0</span>
+        <!-- Image Adjustment Tab -->
+        <div id="image-tab" class="tab-content">
+            <div class="controls-group">
+                <div class="controls-grid">
+                    <div class="control-item">
+                        <div class="slider-control">
+                            <div class="slider-label">
+                                <span>Brightness</span>
+                                <span id="brightnessValue">0</span>
+                            </div>
+                            <input type="range" id="brightnessSlider" min="-100" max="100" step="5" value="0">
+                            <div class="info-text">Adjust image brightness</div>
+                        </div>
                     </div>
-                    <input type="range" id="brightnessSlider" min="-100" max="100" step="5" value="0">
-                    <div class="info-text">Adjust image brightness</div>
-                </div>
-            </div>
-            
-            <div class="control-item">
-                <div class="slider-control">
-                    <div class="slider-label">
-                        <span>Contrast</span>
-                        <span id="contrastValue">0</span>
+                    
+                    <div class="control-item">
+                        <div class="slider-control">
+                            <div class="slider-label">
+                                <span>Contrast</span>
+                                <span id="contrastValue">0</span>
+                            </div>
+                            <input type="range" id="contrastSlider" min="-100" max="100" step="5" value="0">
+                            <div class="info-text">Adjust image contrast</div>
+                        </div>
                     </div>
-                    <input type="range" id="contrastSlider" min="-100" max="100" step="5" value="0">
-                    <div class="info-text">Adjust image contrast</div>
-                </div>
-            </div>
 
-            <div class="control-item">
-                <div class="slider-control">
-                    <div class="slider-label">
-                        <span>Brilliance</span>
-                        <span id="brillianceValue">0</span>
+                    <div class="control-item">
+                        <div class="slider-control">
+                            <div class="slider-label">
+                                <span>Brilliance</span>
+                                <span id="brillianceValue">0</span>
+                            </div>
+                            <input type="range" id="brillianceSlider" min="-100" max="100" step="5" value="0">
+                            <div class="info-text">Enhance mid-tones</div>
+                        </div>
                     </div>
-                    <input type="range" id="brillianceSlider" min="-100" max="100" step="5" value="0">
-                    <div class="info-text">Enhance mid-tones</div>
-                </div>
-            </div>
-            
-            <div class="control-item">
-                <div class="slider-control">
-                    <div class="slider-label">
-                        <span>Shadows</span>
-                        <span id="shadowsValue">0</span>
+                    
+                    <div class="control-item">
+                        <div class="slider-control">
+                            <div class="slider-label">
+                                <span>Shadows</span>
+                                <span id="shadowsValue">0</span>
+                            </div>
+                            <input type="range" id="shadowsSlider" min="-100" max="100" step="5" value="0">
+                            <div class="info-text">Adjust details in dark areas</div>
+                        </div>
                     </div>
-                    <input type="range" id="shadowsSlider" min="-100" max="100" step="5" value="0">
-                    <div class="info-text">Adjust details in dark areas</div>
-                </div>
-            </div>
-        </div>
-        
-        <div class="section-divider"></div>
-        <div class="section-title">Edge Detection Settings</div>
-        
-        <div class="controls-grid">
-            <div class="control-item">
-                <div class="slider-control">
-                    <div class="slider-label">
-                        <span>Blur Radius</span>
-                        <span id="blurRadiusValue">1</span>
-                    </div>
-                    <input type="range" id="blurRadiusSlider" min="0.5" max="5" step="0.2" value="1">
-                    <div class="info-text">Reduces noise before processing</div>
-                </div>
-            </div>
-            
-            <div class="control-item">
-                <div class="slider-control">
-                    <div class="slider-label">
-                        <span>Edge Sensitivity</span>
-                        <span id="edgeSensitivityValue">1.8</span>
-                    </div>
-                    <input type="range" id="edgeSensitivitySlider" min="0.8" max="5" step="0.1" value="1.8">
-                    <div class="info-text">Amplifies edge detection strength</div>
                 </div>
             </div>
         </div>
@@ -373,12 +485,35 @@
         <div id="statusIndicator" class="status-indicator"></div>
         
         <div class="button-container">
-            <button id="processBtn" disabled>Process Image</button>
-            <button id="resetBtn" disabled>Reset Settings</button>
+            <button id="resetBtn">Reset Settings</button>
         </div>
     </div>
 
     <!-- Load the required libraries -->
-    <script src="potrace-demo.js"></script>
+    <script src="potrace.js" defer></script>
+    <script src="potrace-demo.js" defer></script>
+    
+    <!-- Tab switching functionality -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const tabButtons = document.querySelectorAll('.tab-button');
+            const tabContents = document.querySelectorAll('.tab-content');
+            
+            tabButtons.forEach(button => {
+                button.addEventListener('click', function() {
+                    // Remove active class from all buttons and contents
+                    tabButtons.forEach(btn => btn.classList.remove('active'));
+                    tabContents.forEach(content => content.classList.remove('active'));
+                    
+                    // Add active class to clicked button
+                    this.classList.add('active');
+                    
+                    // Show corresponding content
+                    const tabId = this.getAttribute('data-tab');
+                    document.getElementById(`${tabId}-tab`).classList.add('active');
+                });
+            });
+        });
+    </script>
 </body>
 </html> 
