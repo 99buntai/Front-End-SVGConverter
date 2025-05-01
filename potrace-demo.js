@@ -135,7 +135,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (originalImage) {
                 processImage();
             }
-        }, 10);
+        }, 100);
     }
     
     /**
