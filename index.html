@@ -76,7 +76,6 @@
         }
         .preview-content {
             height: 150px;
-            padding: 5px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -103,12 +102,13 @@
         .preview-panel button:hover {
             opacity: 1;
         }
-        img, svg {
+        img, svg, canvas {
             max-width: 100%;
-            max-height: 250px;
+            max-height: 100%;
             display: block;
             margin: 0 auto;
             border-radius: 4px;
+            object-fit: contain;
         }
         .controls {
             background-color: #f9f9f9;
@@ -321,7 +321,6 @@
             
             .preview-content, .original .preview-content {
                 height: 200px;
-                padding: 10px;
             }
             
             .preview-panel h3 {

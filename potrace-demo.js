@@ -328,7 +328,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // Apply same styling as images to maintain consistent display size
         canvas.style.maxWidth = '100%';
-        canvas.style.maxHeight = '300px';
+        canvas.style.maxHeight = '100%';
         canvas.style.display = 'block';
         canvas.style.margin = '0 auto';
         canvas.style.borderRadius = '4px';
