@@ -7,8 +7,39 @@
  * Version: 1.0.0
  */
 
+// Add a fallback logging mechanism at the top of the file
+// Right after the SVG Line Art Converter comment block
+
+/**
+ * Safe debug logging mechanism that works even if the debug console isn't loaded
+ * @param {string} message - Message to log
+ * @param {boolean} showTiming - Whether to show timing
+ */
+function safeLog(message, showTiming = false) {
+    // If debug console exists, use it
+    if (window.debugConsole) {
+        window.debugConsole.log(message, showTiming);
+    } else {
+        // Otherwise, just use console.log
+        console.log(message);
+    }
+}
+
+/**
+ * Safe timing start function
+ */
+function safeStartTiming() {
+    if (window.debugConsole) {
+        return window.debugConsole.startTiming();
+    }
+    return performance.now();
+}
+
 // Main application code
 document.addEventListener('DOMContentLoaded', () => {
+    // Get mobile optimization info (must be loaded before this script)
+    const mobileInfo = window.mobileOptimizationInfo || { isMobile: false }; 
+    
     // DOM elements
     const fileInput = document.getElementById('fileInput');
     const uploadContainer = document.getElementById('uploadContainer');
@@ -19,6 +50,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const downloadSilhouetteBtn = document.getElementById('downloadSilhouetteBtn');
     const resetBtn = document.getElementById('resetBtn');
     const statusIndicator = document.getElementById('statusIndicator');
+    
+    // Mobile specific controls
+    const enableDetailedMobileToggle = document.getElementById('enableDetailedMobileToggle');
     
     // Slider controls
     const thresholdSlider = document.getElementById('thresholdSlider');
@@ -45,11 +79,36 @@ document.addEventListener('DOMContentLoaded', () => {
     const invertSourceToggle = document.getElementById('invertSourceToggle');
     
     // State variables
-    let originalImage = null;
-    let currentSvgData = null;
-    let currentSilhouetteSvgData = null;
-    let processingTimer = null;
-    let originalImageData = null;
+    let originalImage = null;         // Original uploaded image
+    let originalImageData = null;     // Original image pixel data for adjustments
+    let currentSvgData = null;        // Current line art SVG data
+    let currentSilhouetteSvgData = null; // Current silhouette SVG data
+    let processingTimer = null;       // Timer for debouncing processing requests
+
+    // Interactive processing state
+    let processingStartTime = 0;      // Performance tracking
+    let isInteractive = false;        // Whether we're in fast interactive mode
+    let detailedProcessingTimer = null; // Timer for detailed processing after user stops interaction
+    const DETAILED_PROCESSING_DELAY = 20; // ms to wait before starting detailed processing (desktop)
+    
+    // Non-mobile specific state (used if not mobile)
+    let desktopIsProcessingActive = false;
+    let desktopLastInteractionTime = 0;
+    
+    // --- Use mobile state if available, otherwise use desktop state ---
+    const appState = mobileInfo.isMobile ? mobileInfo.state : {
+        isProcessingActive: desktopIsProcessingActive,
+        lastInteractionTime: desktopLastInteractionTime
+    };
+    // Helper to update state correctly
+    const updateAppState = (newState) => {
+        if (mobileInfo.isMobile) {
+            Object.assign(mobileInfo.state, newState);
+        } else {
+            if (Object.prototype.hasOwnProperty.call(newState, 'isProcessingActive')) desktopIsProcessingActive = newState.isProcessingActive;
+            if (Object.prototype.hasOwnProperty.call(newState, 'lastInteractionTime')) desktopLastInteractionTime = newState.lastInteractionTime;
+        }
+    };
     
     // Default values for controls
     const defaultSettings = {
@@ -73,44 +132,21 @@ document.addEventListener('DOMContentLoaded', () => {
     downloadSilhouetteBtn.addEventListener('click', () => downloadSvg('silhouette'));
     resetBtn.addEventListener('click', resetSettings);
     
-    // Add debounced event listeners to all controls
-    const controlInputs = [
-        thresholdSlider, smoothingSlider, lineThicknessSlider, 
-        blurRadiusSlider, edgeSensitivitySlider, brightnessSlider,
-        contrastSlider, brillianceSlider, shadowsSlider, invertColorsToggle,
-        invertSourceToggle
-    ];
+    // REPLACE the old event listener code with the new setup
+    setupEventListeners();
     
-    for (const input of controlInputs) {
-        if (input.type === 'range') {
-            input.addEventListener('input', () => {
-                // Update display value
-                const updateFnName = `update${input.id.charAt(0).toUpperCase() + input.id.slice(1, -6)}Value`;
-                if (typeof window[updateFnName] === 'function') {
-                    window[updateFnName]();
-                }
-                // Show updating status
-                updateStatus('Updating...');
-                // Debounce the processing
-                debouncedProcessImage();
-            });
-        } else if (input.type === 'checkbox') {
-            input.addEventListener('change', () => {
-                // Update source image immediately if it's the invert source toggle
-                if (input.id === 'invertSourceToggle') {
-                    displayOriginalImage();
-                }
-                updateStatus('Updating...');
-                debouncedProcessImage();
-            });
-        }
-    }
+    // Initialize control displays
+    updateThresholdValue();
+    updateSmoothingValue();
+    updateLineThicknessValue();
+    updateBlurRadiusValue();
+    updateEdgeSensitivityValue();
+    updateBrightnessValue();
+    updateContrastValue();
+    updateBrillianceValue();
+    updateShadowsValue();
     
-    /**
-     * Update status indicator
-     * @param {string} message - Status message to display
-     * @param {boolean} isProcessing - Whether this is a processing status
-     */
+    // Update the status update function (simpler now)
     function updateStatus(message, isProcessing = true) {
         statusIndicator.textContent = message;
         if (isProcessing) {
@@ -118,31 +154,76 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             statusIndicator.classList.remove('processing');
         }
+        
+        // Don't auto-clear important messages
+        if (message.includes('Complete') || message.includes('Processed')) {
+            // This is a completion message, keep it visible longer
+            if (window.statusTimeout) {
+                clearTimeout(window.statusTimeout);
+            }
+            window.statusTimeout = setTimeout(() => {
+                statusIndicator.textContent = '';
+                statusIndicator.classList.remove('processing');
+            }, 5000);
+        }
     }
     
-    /**
-     * Clear status after a delay
-     * @param {number} delay - Delay in milliseconds
-     */
-    function clearStatus(delay = 5000) {
-        setTimeout(() => {
+    // Simplify clear status
+    function clearStatus() {
             statusIndicator.textContent = '';
             statusIndicator.classList.remove('processing');
-        }, delay);
     }
     
     /**
-     * Debounce function for processing
+     * Debounce function for processing - optimized for mobile
      */
     function debouncedProcessImage() {
+        // Record the time of this interaction
+        updateAppState({ lastInteractionTime: Date.now() });
+        
+        // Clear any existing timer
         if (processingTimer) {
             clearTimeout(processingTimer);
         }
+        
+        // If currently processing, don't immediately start another process
+        if (appState.isProcessingActive) {
+            // Just schedule another attempt after a short delay
+            if (mobileInfo.isMobile) { // Only reschedule automatically on mobile
+                 processingTimer = setTimeout(debouncedProcessImage, 100);
+            }
+            return;
+        }
+        
+        // Set a timeout appropriate for device performance
+        const debounceTime = mobileInfo.isMobile ? 150 : 10;
         processingTimer = setTimeout(() => {
             if (originalImage) {
-                processImage();
+                // Mark as processing to prevent simultaneous processing
+                updateAppState({ isProcessingActive: true });
+                
+                // Start with interactive mode for fast feedback
+                isInteractive = true;
+                
+                // Process the image
+                processImage(() => {
+                    // When complete, mark as no longer processing
+                    updateAppState({ isProcessingActive: false });
+                    
+                    // Check if another processing was requested during this one (mobile check)
+                    if (mobileInfo.isMobile) {
+                        const timeSinceLastInteraction = Date.now() - appState.lastInteractionTime;
+                        if (timeSinceLastInteraction < 200) {
+                            // User interacted during processing, process again
+                            debouncedProcessImage();
+                            return; // Don't schedule detailed processing yet
+                        }
+                    }
+                    // Schedule detailed processing
+                    scheduleDetailedProcessing();
+                });
             }
-        }, 200);
+        }, debounceTime);
     }
     
     /**
@@ -181,7 +262,6 @@ document.addEventListener('DOMContentLoaded', () => {
     
     /**
      * Handle file upload
-     * @param {Event} event - File input change event
      */
     function handleFileSelect(event) {
         const file = event.target.files[0];
@@ -280,11 +360,6 @@ document.addEventListener('DOMContentLoaded', () => {
     
     /**
      * Apply image adjustments to pixel data
-     * @param {Uint8ClampedArray} data - Image pixel data
-     * @param {number} brightness - Brightness adjustment (-100 to 100)
-     * @param {number} contrast - Contrast adjustment (-100 to 100)
-     * @param {number} brilliance - Brilliance adjustment (-100 to 100)
-     * @param {number} shadows - Shadows adjustment (-100 to 100)
      */
     function applyImageAdjustments(data, brightness, contrast, brilliance, shadows) {
         // Convert contrast value to multiplier (0-100 -> 0-2)
@@ -351,7 +426,6 @@ document.addEventListener('DOMContentLoaded', () => {
     
     /**
      * Invert image pixel data
-     * @param {Uint8ClampedArray} data - Image pixel data
      */
     function invertImageData(data) {
         for (let i = 0; i < data.length; i += 4) {
@@ -363,50 +437,42 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     
-    // Update threshold value display
+    // Control update functions
     function updateThresholdValue() {
         thresholdValue.textContent = thresholdSlider.value;
     }
     
-    // Update smoothing value display
     function updateSmoothingValue() {
         smoothingValue.textContent = smoothingSlider.value;
     }
     
-    // Update line thickness value display
     function updateLineThicknessValue() {
         lineThicknessValue.textContent = lineThicknessSlider.value;
     }
     
-    // Update blur radius value display
     function updateBlurRadiusValue() {
         blurRadiusValue.textContent = blurRadiusSlider.value;
     }
     
-    // Update edge sensitivity value display
     function updateEdgeSensitivityValue() {
         edgeSensitivityValue.textContent = edgeSensitivitySlider.value;
     }
     
-    // Update brightness value display
     function updateBrightnessValue() {
         brightnessValue.textContent = brightnessSlider.value;
         displayOriginalImage();
     }
     
-    // Update contrast value display
     function updateContrastValue() {
         contrastValue.textContent = contrastSlider.value;
         displayOriginalImage();
     }
     
-    // Update brilliance value display
     function updateBrillianceValue() {
         brillianceValue.textContent = brillianceSlider.value;
         displayOriginalImage();
     }
     
-    // Update shadows value display
     function updateShadowsValue() {
         shadowsValue.textContent = shadowsSlider.value;
         displayOriginalImage();
@@ -431,9 +497,44 @@ document.addEventListener('DOMContentLoaded', () => {
         updateStatus('Preparing download...');
         
         try {
+            // --- For download, ALWAYS do a final non-interactive render for highest quality --- 
+            if (originalImage) {
+                isInteractive = false; // Mark as non-interactive for final quality
+                updateAppState({ isProcessingActive: true }); // Mark as processing
+                
+                // Show a processing indicator
+                const previewContainer = type === 'line' ? svgPreview : silhouettePreview;
+                previewContainer.innerHTML = '<div style="text-align: center; padding: 20px;">Processing high-quality export...</div>';
+                
+                // Process with best quality using setTimeout to allow UI update
+                 setTimeout(() => {
+                    processImage(() => {
+                        updateAppState({ isProcessingActive: false }); // Clear processing flag
             const svgData = type === 'line' ? currentSvgData : currentSilhouetteSvgData;
-            if (!svgData) throw new Error("No SVG data found");
+                        if (!svgData) {
+                             handleProcessingError(new Error("Failed to generate SVG data for download"), originalImage.naturalWidth, originalImage.naturalHeight);
+                             return;
+                         }
+                        completeSvgDownload(type, svgData);
+                    });
+                }, 10); // Short delay to ensure UI updates
+                return;
+            }
             
+            // Fallback to existing data if needed (should ideally not happen with the above logic)
+            const svgData = type === 'line' ? currentSvgData : currentSilhouetteSvgData;
+            if (!svgData) throw new Error("No SVG data found for download");
+            completeSvgDownload(type, svgData);
+        } catch (error) {
+            console.error(`Error downloading ${type} SVG:`, error);
+            updateStatus(`Download error: ${error.message}`, false);
+            updateAppState({ isProcessingActive: false }); // Ensure flag is cleared on error
+        }
+    }
+    
+    // Function to complete SVG download after processing
+    function completeSvgDownload(type, svgData) {
+        try {
             // Get the SVG element directly
             const svgElement = type === 'line' ? 
                 svgPreview.querySelector('svg') : 
@@ -466,21 +567,47 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 
                 // Set the fill color based on invert setting
-                const fillColor = invertColorsToggle.checked ? 'white' : 'black';
+                const fillColor = 'black';
                 
                 // Add paths to clean SVG
                 for (const path of paths) {
                     const clonedPath = path.cloneNode(true);
-                    // Set the fill color (invert color applies to silhouette too)
+                    // Set the fill color (always black for silhouette)
                     clonedPath.setAttribute('fill', fillColor);
                     // Remove any stroke
                     clonedPath.removeAttribute('stroke');
+                    // Optimize path data
+                    if (clonedPath.hasAttribute('d')) {
+                        const optimizedPath = optimizeSvgPath(clonedPath.getAttribute('d'));
+                        clonedPath.setAttribute('d', optimizedPath);
+                    }
                     cleanSvg.appendChild(clonedPath);
+                }
+                
+                // Add background if inverted
+                if (invertColorsToggle.checked) {
+                    // Create a white background rectangle
+                    const bgRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                    bgRect.setAttribute('width', '100%');
+                    bgRect.setAttribute('height', '100%');
+                    bgRect.setAttribute('fill', 'white');
+                    // Insert at the beginning
+                    cleanSvg.insertBefore(bgRect, cleanSvg.firstChild);
+                }
+                
+                // Ensure viewBox is set properly for consistent scaling
+                if (!cleanSvg.hasAttribute('viewBox') && cleanSvg.hasAttribute('width') && cleanSvg.hasAttribute('height')) {
+                    const width = cleanSvg.getAttribute('width');
+                    const height = cleanSvg.getAttribute('height');
+                    cleanSvg.setAttribute('viewBox', `0 0 ${width} ${height}`);
                 }
                 
                 // Serialize to string
                 const serializer = new XMLSerializer();
-                const finalSvgString = serializer.serializeToString(cleanSvg);
+                let finalSvgString = serializer.serializeToString(cleanSvg);
+                
+                // Further optimize the SVG string
+                finalSvgString = optimizeSvgString(finalSvgString);
                 
                 // Create download
                 downloadSvgFile(finalSvgString, 'silhouette.svg');
@@ -530,6 +657,12 @@ document.addEventListener('DOMContentLoaded', () => {
                         element.setAttribute('stroke-width', lineThickness);
                         element.setAttribute('stroke-linecap', 'round');
                         element.setAttribute('stroke-linejoin', 'round');
+                    
+                    // Optimize path data
+                    if (element.hasAttribute('d')) {
+                        const optimizedPath = optimizeSvgPath(element.getAttribute('d'));
+                        element.setAttribute('d', optimizedPath);
+                    }
                 }
                 
                 cleanSvg.appendChild(element);
@@ -537,12 +670,15 @@ document.addEventListener('DOMContentLoaded', () => {
             
             // Serialize the SVG to string
             const serializer = new XMLSerializer();
-            const cleanSvgString = serializer.serializeToString(cleanSvg);
+            let cleanSvgString = serializer.serializeToString(cleanSvg);
+            
+            // Further optimize the SVG string
+            cleanSvgString = optimizeSvgString(cleanSvgString);
             
             // Create download
             downloadSvgFile(cleanSvgString, 'lineart.svg');
         } catch (error) {
-            console.error(`Error downloading ${type} SVG:`, error);
+            console.error(`Error completing SVG download: ${error.message}`);
             updateStatus(`Download error: ${error.message}`, false);
         }
     }
@@ -566,78 +702,241 @@ document.addEventListener('DOMContentLoaded', () => {
             }, 100);
     }
     
-    // Process the image to generate SVG
-    function processImage() {
+    /**
+     * Schedule detailed processing after user stops interaction - optimized for mobile
+     */
+    function scheduleDetailedProcessing() {
+        // Cancel any pending detailed processing
+        if (detailedProcessingTimer) {
+            clearTimeout(detailedProcessingTimer);
+            safeLog("Cancelled pending detailed processing");
+        }
+        
+        // --- Mobile check: Only run detailed processing if enabled by checkbox --- 
+        if (mobileInfo.isMobile && !enableDetailedMobileToggle.checked) {
+            safeLog("Detailed processing skipped on mobile (disabled by user).");
+            return; // Don't schedule if disabled on mobile
+        }
+        
+        // Calculate appropriate delay based on device capability
+        const detailDelay = mobileInfo.isMobile ? 800 : DETAILED_PROCESSING_DELAY;
+        
+        // Schedule new detailed processing
+        safeLog("Scheduling detailed processing...");
+        detailedProcessingTimer = setTimeout(() => {
+            // Only proceed if no processing is currently active
+            if (appState.isProcessingActive) {
+                // Try again later (only reschedule automatically on mobile if detailed is enabled)
+                if (mobileInfo.isMobile && enableDetailedMobileToggle.checked) {
+                     scheduleDetailedProcessing(); 
+                }
+                return;
+            }
+            
+            // Check if user has interacted recently
+            const timeSinceLastInteraction = Date.now() - appState.lastInteractionTime;
+            const recentInteractionThreshold = mobileInfo.isMobile ? 500 : 50; // Shorter threshold for desktop
+            if (timeSinceLastInteraction < recentInteractionThreshold) {
+                // User interacted too recently, reschedule (only if detailed enabled on mobile)
+                 if (!mobileInfo.isMobile || enableDetailedMobileToggle.checked) {
+                    scheduleDetailedProcessing();
+                 }
+                return;
+            }
+            
+            // Start detailed processing
+            updateAppState({ isProcessingActive: true });
+            isInteractive = false;
+            safeLog("Starting detailed rendering");
+            safeStartTiming();
+            updateStatus('Generating detailed output...');
+            
+            // Process image with callback to clear processing state
+            processImage(() => {
+                updateAppState({ isProcessingActive: false });
+                safeLog("Detailed rendering complete", true);
+            });
+        }, detailDelay);
+    }
+
+    // Setup event listeners function - optimized for mobile
+    function setupEventListeners() {
+        // DOM elements we'll need
+        const sliders = [
+            thresholdSlider, smoothingSlider, lineThicknessSlider, 
+            blurRadiusSlider, edgeSensitivitySlider, brightnessSlider,
+            contrastSlider, brillianceSlider, shadowsSlider
+        ];
+        
+        const toggles = [invertColorsToggle, invertSourceToggle];
+        
+        // Add event listeners to sliders
+        for (const slider of sliders) {
+            slider.addEventListener('input', () => {
+                // Update display value
+                const updateFnName = `update${slider.id.charAt(0).toUpperCase() + slider.id.slice(1, -6)}Value`;
+                if (typeof window[updateFnName] === 'function') {
+                    window[updateFnName]();
+                }
+                
+                // Cancel any pending detailed processing
+                if (detailedProcessingTimer) {
+                    clearTimeout(detailedProcessingTimer);
+                    detailedProcessingTimer = null;
+                    safeLog("Cancelled detailed processing - interactive mode");
+                }
+                
+                // For brightness-related sliders, update the original image display
+                if (['brightnessSlider', 'contrastSlider', 'brillianceSlider', 'shadowsSlider'].includes(slider.id)) {
+                    displayOriginalImage();
+                }
+                
+                // Process with fast preview
+                if (!isInteractive) {
+                    // First time entering interactive mode
+                    safeLog("Entering interactive preview mode");
+                }
+                
+                // Use requestAnimationFrame for better UI responsiveness
+                requestAnimationFrame(() => {
+                    isInteractive = true;
+                    // Process image with debouncing
+                    debouncedProcessImage();
+                });
+            });
+            
+            // On slider release - schedule detailed processing (if applicable)
+            slider.addEventListener('change', () => {
+                // Detailed processing is now handled by scheduleDetailedProcessing,
+                // which includes the mobile checkbox check. We just call it.
+                scheduleDetailedProcessing();
+            });
+        }
+        
+        // Add event listeners to toggles
+        for (const toggle of toggles) {
+            toggle.addEventListener('change', () => {
+                // Update source image immediately if it's the invert source toggle
+                if (toggle.id === 'invertSourceToggle') {
+                    displayOriginalImage();
+                }
+                
+                // Use requestAnimationFrame for better UI responsiveness
+                requestAnimationFrame(() => {
+                    // Process with fast preview
+                    isInteractive = true;
+                    updateStatus('Interactive preview...');
+                    debouncedProcessImage(); // Debounced call handles scheduling detailed processing
+                });
+            });
+        }
+        
+        // Add listener for the new mobile checkbox
+        if (mobileInfo.isMobile && enableDetailedMobileToggle) {
+            enableDetailedMobileToggle.addEventListener('change', () => {
+                // If checked, try scheduling detailed processing immediately
+                if (enableDetailedMobileToggle.checked) {
+                    safeLog("Detailed rendering enabled on mobile. Attempting schedule...");
+                    scheduleDetailedProcessing();
+                } else {
+                     safeLog("Detailed rendering disabled on mobile.");
+                    // Optionally cancel any pending detailed timer if unchecked
+                    if (detailedProcessingTimer) {
+                        clearTimeout(detailedProcessingTimer);
+                        detailedProcessingTimer = null;
+                    }
+                }
+            });
+        }
+    }
+    
+    // Process the image to generate SVG - optimized for mobile
+    function processImage(callback) {
         if (!originalImage || !originalImageData) return;
         
-        // Add a "processing" indicator
+        // Add a "processing" indicator if not in interactive mode
+        if (!isInteractive) {
         updateStatus('Processing...');
         svgPreview.innerHTML = '<div style="text-align: center; padding: 20px;">Processing...</div>';
         silhouettePreview.innerHTML = '<div style="text-align: center; padding: 20px;">Processing...</div>';
+        }
+        
+        // Track processing time
+        processingStartTime = safeStartTiming();
         
         // Use requestAnimationFrame to give UI a chance to update
         requestAnimationFrame(() => {
-            // Get values from controls
+            // --- Get control values (same as before) ---
             const threshold = Number.parseInt(thresholdSlider.value, 10);
-            const smoothing = Number.parseInt(smoothingSlider.value, 10) / 100;
-            const lineThickness = Number.parseFloat(lineThicknessSlider.value);
-            const blurRadius = Number.parseFloat(blurRadiusSlider.value);
-            const edgeSensitivity = Number.parseFloat(edgeSensitivitySlider.value);
+            // ... (get other slider/toggle values)
             const invertColors = invertColorsToggle.checked;
             const invertSource = invertSourceToggle.checked;
             const brightness = Number.parseInt(brightnessSlider.value, 10);
             const contrast = Number.parseInt(contrastSlider.value, 10);
             const brilliance = Number.parseInt(brillianceSlider.value, 10);
             const shadows = Number.parseInt(shadowsSlider.value, 10);
+            const smoothing = Number.parseInt(smoothingSlider.value, 10) / 100;
+            const lineThickness = Number.parseFloat(lineThicknessSlider.value);
+            const blurRadius = Number.parseFloat(blurRadiusSlider.value);
+            const edgeSensitivity = Number.parseFloat(edgeSensitivitySlider.value);
             
-            // Track processing time
+            safeLog(`Processing with invertColors: ${invertColors}`);
             const startTime = performance.now();
             
-            // Create a canvas to process the image with adjustments
+            // Create canvas and apply adjustments (same as before)
             const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d', { willReadFrequently: true });
-            
-            // Set canvas dimensions to match the image
+            // ... (set canvas size)
             canvas.width = originalImage.naturalWidth;
             canvas.height = originalImage.naturalHeight;
-            
-            // Create a copy of the original image data with adjustments
+            const ctx = canvas.getContext('2d', { willReadFrequently: true });
             const adjustedData = new ImageData(
                 new Uint8ClampedArray(originalImageData.data),
                 originalImageData.width,
                 originalImageData.height
             );
-            
-            // Apply all image adjustments
+            // ... (apply adjustments and inversion)
             if (brightness !== 0 || contrast !== 0 || brilliance !== 0 || shadows !== 0) {
                 applyImageAdjustments(adjustedData.data, brightness, contrast, brilliance, shadows);
             }
-            
-            // Apply source inversion if enabled
             if (invertSource) {
                 invertImageData(adjustedData.data);
             }
-            
-            // Put the adjusted data on the canvas
             ctx.putImageData(adjustedData, 0, 0);
             
             try {
-                // Process line art using Potrace in curve mode
-                const lineArtPromise = processLineArtWithPotrace(canvas, threshold, invertColors, blurRadius, lineThickness, smoothing, edgeSensitivity)
-                    .catch(error => {
+                // --- Determine simplification level based on mobile and interactive state ---
+                let simplifyLevel = 0; // 0: Detailed, 1: Interactive Desktop, 2: Interactive Mobile
+                if (isInteractive) {
+                    simplifyLevel = mobileInfo.isMobile ? 2 : 1;
+                }
+                
+                // Process line art with appropriate simplification level
+                const lineArtPromise = processLineArtWithPotrace(
+                    canvas, threshold, invertColors, blurRadius, lineThickness, smoothing, edgeSensitivity, simplifyLevel
+                ).catch(error => {
                         console.error('Error in line art processing:', error);
                         return createErrorSvg(`Error generating line art: ${error.message}`, canvas.width, canvas.height);
                     });
                 
-                // Process silhouette using Potrace - a more efficient implementation
-                const silhouettePromise = processSilhouette(canvas, threshold, invertColors, blurRadius, smoothing, edgeSensitivity)
-                    .catch(error => {
+                // Process silhouette with appropriate simplification level
+                const silhouettePromise = processSilhouette(
+                    canvas, threshold, invertColors, blurRadius, smoothing, edgeSensitivity, simplifyLevel
+                ).catch(error => {
                         console.error('Error in silhouette processing:', error);
                         return createErrorSvg(`Error generating silhouette: ${error.message}`, canvas.width, canvas.height);
                 });
                 
                 // Wait for both to finish
                 Promise.all([lineArtPromise, silhouettePromise]).then(([lineArtSvg, silhouetteSvg]) => {
+                    // --- Check for recent interaction before updating UI (same as before) ---
+                     if (Date.now() - appState.lastInteractionTime < 200) {
+                        // User has interacted recently, don't update the UI
+                        if (typeof callback === 'function') {
+                            callback(); // Still call callback to potentially trigger next step
+                        }
+                        return;
+                    }
+                    
                     // Store results
                     currentSvgData = lineArtSvg;
                     currentSilhouetteSvgData = silhouetteSvg;
@@ -650,127 +949,106 @@ document.addEventListener('DOMContentLoaded', () => {
                     downloadBtn.disabled = false;
                     downloadSilhouetteBtn.disabled = false;
                     
-                    // Calculate processing time
+                    // --- Log completion time (same as before) ---
                     const endTime = performance.now();
                     const processingTime = Math.round(endTime - startTime);
-                    
-                    // Update status with timing information
+                    const mode = isInteractive ? "Interactive" : "Detailed";
+                    safeLog(`${mode} processing complete in ${processingTime}ms`, true);
                     updateStatus(`Processed in ${processingTime}ms`, false);
-                    clearStatus();
+                    
+                    // If a callback was provided, call it now
+                    if (typeof callback === 'function') {
+                        callback();
+                    }
                 });
             } catch (error) {
                 console.error('Error processing image:', error);
                 handleProcessingError(error, canvas.width, canvas.height);
+                 // Ensure processing state is cleared on error and callback is called
+                updateAppState({ isProcessingActive: false });
+                if (typeof callback === 'function') {
+                    callback();
+                }
             }
         });
     }
     
-    // Process line art using Potrace in curve mode
-    function processLineArtWithPotrace(canvas, threshold, invertColors, blurRadius = 0, lineThickness = 1, smoothing = 0.5, sensitivity = 1.8) {
-        // Create a canvas for Potrace input
+    // Process line art using Potrace - updated with simplifyLevel
+    function processLineArtWithPotrace(canvas, threshold, invertColors, blurRadius = 0, lineThickness = 1, smoothing = 0.5, sensitivity = 1.8, simplifyLevel = 0) {
         const potraceCanvas = document.createElement('canvas');
         const potraceCtx = potraceCanvas.getContext('2d', { willReadFrequently: true });
         
-        // Set correct dimensions
-        potraceCanvas.width = canvas.width;
-        potraceCanvas.height = canvas.height;
+        // --- Scale canvas based on simplifyLevel (more aggressive for mobile) ---
+        let scaleFactor = 1;
+        if (simplifyLevel === 2) { // Interactive Mobile
+            const maxSize = Math.max(canvas.width, canvas.height);
+            if (maxSize > 600) scaleFactor = maxSize / 600; // More aggressive downsampling
+        } else if (simplifyLevel === 1) { // Interactive Desktop
+            const maxSize = Math.max(canvas.width, canvas.height);
+            if (maxSize > 800) scaleFactor = maxSize / 800;
+        }
         
-        // Draw the source canvas to our working canvas
+        potraceCanvas.width = Math.floor(canvas.width / scaleFactor);
+        potraceCanvas.height = Math.floor(canvas.height / scaleFactor);
         potraceCtx.drawImage(canvas, 0, 0, potraceCanvas.width, potraceCanvas.height);
         
-        // Get image data for processing
         let imageData = potraceCtx.getImageData(0, 0, potraceCanvas.width, potraceCanvas.height);
         
-        // Apply blur if radius > 0
-        if (blurRadius > 0) {
+        // --- Apply effects conditionally based on simplifyLevel ---
+        if (simplifyLevel === 0) { // Only enhance edges in detailed mode
+            const enhancedData = enhanceEdges(imageData.data, potraceCanvas.width, potraceCanvas.height, sensitivity);
+            imageData = new ImageData(enhancedData, potraceCanvas.width, potraceCanvas.height);
+        }
+        
+        if (blurRadius > 0 && simplifyLevel < 2) { // Apply blur unless in fastest mobile mode
             const pixels = imageData.data;
-            applyGaussianBlur(pixels, potraceCanvas.width, potraceCanvas.height, blurRadius);
-            // Re-apply to canvas after blur
+            applyBlur(pixels, potraceCanvas.width, potraceCanvas.height, blurRadius, simplifyLevel === 0);
             potraceCtx.putImageData(imageData, 0, 0);
-            // Get the updated image data
             imageData = potraceCtx.getImageData(0, 0, potraceCanvas.width, potraceCanvas.height);
         }
         
-        // Create binary image data with threshold
-        const binaryData = new Uint8ClampedArray(imageData.data.length);
-        
-        // Apply threshold to create binary image
-        for (let i = 0; i < imageData.data.length; i += 4) {
-            const r = imageData.data[i];
-            const g = imageData.data[i + 1];
-            const b = imageData.data[i + 2];
-            
-            // Convert to grayscale
-            const gray = 0.299 * r + 0.587 * g + 0.114 * b;
-            
-            // Apply threshold
-            const isBlack = gray < threshold;
-            
-            // Set pixel value (consider invert setting)
-            const pixelValue = invertColors ? !isBlack : isBlack;
-            
-            // Set all channels to black or white
-            const value = pixelValue ? 0 : 255;
-            binaryData[i] = value;
-            binaryData[i + 1] = value;
-            binaryData[i + 2] = value;
-            binaryData[i + 3] = 255; // Full alpha
-        }
-        
-        // Put binary image back to canvas
+        const binaryData = applyThreshold(
+            imageData.data, potraceCanvas.width, potraceCanvas.height, threshold, invertColors, 
+            simplifyLevel === 0 // Adaptive threshold only in detailed mode
+        );
         potraceCtx.putImageData(new ImageData(binaryData, potraceCanvas.width, potraceCanvas.height), 0, 0);
         
-        // Map sensitivity (0.8-5.0) to turdsize (1-10), inverse relationship
-        // Higher sensitivity = less noise removal
-        const turdsize = Math.round(10 - (sensitivity * 2));
+        // --- Adjust Potrace tolerance based on simplifyLevel ---
+        const turdsize = Math.max(2, Math.min(10, 8 - sensitivity));
+        let opttolerance;
+        if (simplifyLevel === 2) {
+            opttolerance = 0.6 + (smoothing * 0.6);  // Very relaxed
+        } else if (simplifyLevel === 1) {
+            opttolerance = 0.4 + (smoothing * 0.6);  // Relaxed
+        } else {
+            opttolerance = 0.3 + (smoothing * 0.65); // Precise
+        }
         
-        // Map smoothing (0-1.0) to opttolerance (0.1-1.0)
-        // Higher smoothing = higher tolerance for curve optimization
-        const opttolerance = 0.1 + (smoothing * 0.9);
-        
-        // Configure Potrace parameters with user slider values
-        Potrace.setParameter({
-            turdsize: Math.max(1, Math.min(10, turdsize)),    // Adjust speckle threshold based on sensitivity
-            alphamax: 1.0,                                   // Corner threshold
-            optcurve: true,                                 // Always optimize curves
-            opttolerance: opttolerance,                    // Tolerance based on smoothing 
-            turnpolicy: "minority"                        // Path decomposition approach
-        });
-        
-        // Process with Potrace
+        Potrace.setParameter({ turdsize, alphamax: 0.5, optcurve: true, opttolerance, turnpolicy: "majority" });
         Potrace.loadImageFromCanvas(potraceCanvas);
         
+        // --- Potrace promise execution (same as before) ---
         return new Promise((resolve, reject) => {
             try {
                 Potrace.process(() => {
                     try {
-                        // Get SVG with "curve" mode for line art (strokes, not fills)
                         const svgData = Potrace.getSVG(1, "curve");
-                        
-                        // Fix SVG viewBox if needed
                         let fixedSvg = svgData;
+                         // ... (viewBox and styling fixes remain the same)
                         const widthMatch = svgData.match(/width="([^"]+)"/);
                         const heightMatch = svgData.match(/height="([^"]+)"/);
-                        
                         if (widthMatch && heightMatch) {
                             const svgWidth = Number.parseFloat(widthMatch[1]);
                             const svgHeight = Number.parseFloat(heightMatch[1]);
-                            
-                            // Add viewBox if missing
                             if (svgData.indexOf('viewBox') === -1) {
                                 fixedSvg = svgData.replace('<svg', `<svg viewBox="0 0 ${svgWidth} ${svgHeight}"`);
                             }
                         }
-                        
-                        // Handle inverted colors and line thickness
                         const strokeColor = invertColors ? 'white' : 'black';
                         fixedSvg = fixedSvg.replace('stroke="black"', `stroke="${strokeColor}" stroke-width="${lineThickness}" stroke-linecap="round" stroke-linejoin="round"`);
-                        
-                        // Add background for display if inverted
                         if (invertColors) {
                             fixedSvg = fixedSvg.replace('<path', `<rect width="100%" height="100%" fill="black"/><path`);
                         }
-                        
                         resolve(fixedSvg);
                     } catch (error) {
                         console.error("Error generating line art SVG with Potrace:", error);
@@ -784,110 +1062,82 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     
-    // Process silhouette using Potrace - a more efficient implementation
-    function processSilhouette(canvas, threshold, invertColors, blurRadius = 0, smoothing = 0.5, sensitivity = 1.8) {
-        // Create a canvas for Potrace input
+    // Process silhouette using Potrace - updated with simplifyLevel
+    function processSilhouette(canvas, threshold, invertColors, blurRadius = 0, smoothing = 0.5, sensitivity = 1.8, simplifyLevel = 0) {
         const potraceCanvas = document.createElement('canvas');
         const potraceCtx = potraceCanvas.getContext('2d', { willReadFrequently: true });
         
-        // Set correct dimensions
-        potraceCanvas.width = canvas.width;
-        potraceCanvas.height = canvas.height;
+        // --- Scale canvas based on simplifyLevel (more aggressive for mobile) ---
+        let scaleFactor = 1;
+        if (simplifyLevel === 2) { // Interactive Mobile
+            const maxSize = Math.max(canvas.width, canvas.height);
+             if (maxSize > 500) scaleFactor = maxSize / 500; // More aggressive downsampling
+        } else if (simplifyLevel === 1) { // Interactive Desktop
+            const maxSize = Math.max(canvas.width, canvas.height);
+            if (maxSize > 800) scaleFactor = maxSize / 800;
+        }
         
-        // Draw the source canvas to our working canvas
+        potraceCanvas.width = Math.floor(canvas.width / scaleFactor);
+        potraceCanvas.height = Math.floor(canvas.height / scaleFactor);
         potraceCtx.drawImage(canvas, 0, 0, potraceCanvas.width, potraceCanvas.height);
         
-        // Get image data for processing
         let imageData = potraceCtx.getImageData(0, 0, potraceCanvas.width, potraceCanvas.height);
         
-        // Apply blur if radius > 0
-        if (blurRadius > 0) {
+        // --- Apply effects conditionally based on simplifyLevel ---
+        if (simplifyLevel === 0) { // Only enhance edges in detailed mode
+            const enhancedData = enhanceEdges(imageData.data, potraceCanvas.width, potraceCanvas.height, sensitivity);
+             imageData = new ImageData(enhancedData, potraceCanvas.width, potraceCanvas.height);
+        }
+        
+        if (blurRadius > 0 && simplifyLevel < 2) { // Apply blur unless in fastest mobile mode
             const pixels = imageData.data;
-            applyGaussianBlur(pixels, potraceCanvas.width, potraceCanvas.height, blurRadius);
-            // Re-apply to canvas after blur
+            applyBlur(pixels, potraceCanvas.width, potraceCanvas.height, blurRadius, simplifyLevel === 0);
             potraceCtx.putImageData(imageData, 0, 0);
-            // Get the updated image data
             imageData = potraceCtx.getImageData(0, 0, potraceCanvas.width, potraceCanvas.height);
         }
         
-        // Create binary image data with threshold
-        const binaryData = new Uint8ClampedArray(imageData.data.length);
-        
-        // Apply threshold to create binary image
-        for (let i = 0; i < imageData.data.length; i += 4) {
-            const r = imageData.data[i];
-            const g = imageData.data[i + 1];
-            const b = imageData.data[i + 2];
-            
-            // Convert to grayscale
-            const gray = 0.299 * r + 0.587 * g + 0.114 * b;
-            
-            // Apply threshold
-            const isBlack = gray < threshold;
-            
-            // Set pixel value (consider invert setting)
-            const pixelValue = invertColors ? !isBlack : isBlack;
-            
-            // Set all channels to black or white
-            const value = pixelValue ? 0 : 255;
-            binaryData[i] = value;
-            binaryData[i + 1] = value;
-            binaryData[i + 2] = value;
-            binaryData[i + 3] = 255; // Full alpha
-        }
-        
-        // Put binary image back to canvas
+        const binaryData = applyThreshold(
+            imageData.data, potraceCanvas.width, potraceCanvas.height, threshold, invertColors, 
+            simplifyLevel === 0 // Adaptive threshold only in detailed mode
+        );
         potraceCtx.putImageData(new ImageData(binaryData, potraceCanvas.width, potraceCanvas.height), 0, 0);
         
-        // Map sensitivity (0.8-5.0) to turdsize (2-15), inverse relationship
-        // For silhouette, we use a slightly higher range to preserve shape integrity
-        const turdsize = Math.round(15 - (sensitivity * 3));
-        
-        // Map smoothing (0-1.0) to opttolerance (0.1-0.8)
-        // For silhouette, we want slightly less aggressive optimization
-        const opttolerance = 0.1 + (smoothing * 0.7);
-        
-        // Configure Potrace parameters for better quality
-        Potrace.setParameter({
-            turdsize: Math.max(2, Math.min(15, turdsize)),    // Suppress speckles based on sensitivity
-            alphamax: 1.0,                                   // Corner threshold
-            optcurve: true,                                 // Optimize curves
-            opttolerance: opttolerance,                    // Curve optimization tolerance based on smoothing
-            turnpolicy: "minority"                        // Path decomposition approach
-        });
-        
-        // Process with Potrace
+         // --- Adjust Potrace tolerance based on simplifyLevel ---
+        const turdsize = Math.max(2, Math.min(12, 8 - sensitivity)); // Slightly different turdsize for silhouette
+        let opttolerance;
+        if (simplifyLevel === 2) {
+            opttolerance = 0.6 + (smoothing * 0.6);  // Very relaxed
+        } else if (simplifyLevel === 1) {
+            opttolerance = 0.4 + (smoothing * 0.6);  // Relaxed
+        } else {
+            opttolerance = 0.3 + (smoothing * 0.65); // Precise
+        }
+
+        Potrace.setParameter({ turdsize, alphamax: 0.5, optcurve: true, opttolerance, turnpolicy: "majority" });
         Potrace.loadImageFromCanvas(potraceCanvas);
         
+        // --- Potrace promise execution (same as before) ---
         return new Promise((resolve, reject) => {
             try {
                 Potrace.process(() => {
                     try {
-                        // Get SVG at original size
-                        const svgData = Potrace.getSVG(1);
-                        
-                        // Fix SVG viewBox if needed
+                        const svgData = Potrace.getSVG(1); // Default mode for silhouette
                         let fixedSvg = svgData;
+                         // ... (viewBox and styling fixes remain the same)
                         const widthMatch = svgData.match(/width="([^"]+)"/);
                         const heightMatch = svgData.match(/height="([^"]+)"/);
-                        
                         if (widthMatch && heightMatch) {
                             const svgWidth = Number.parseFloat(widthMatch[1]);
                             const svgHeight = Number.parseFloat(heightMatch[1]);
-                            
-                            // Add viewBox if missing
                             if (svgData.indexOf('viewBox') === -1) {
                                 fixedSvg = svgData.replace('<svg', `<svg viewBox="0 0 ${svgWidth} ${svgHeight}"`);
                             }
                         }
-                        
-                        // Handle inverted colors
                         if (invertColors) {
-                            fixedSvg = fixedSvg.replace('fill="black"', 'fill="black"');
-                            // Add background for display
-                            fixedSvg = fixedSvg.replace('<path', '<rect width="100%" height="100%" fill="white"/><path');
+                            const rectString = '<rect width="100%" height="100%" fill="white"/>';
+                            const svgTagEnd = fixedSvg.indexOf('>') + 1;
+                            fixedSvg = fixedSvg.substring(0, svgTagEnd) + rectString + fixedSvg.substring(svgTagEnd);
                         }
-                        
                         resolve(fixedSvg);
                     } catch (error) {
                         console.error("Error generating SVG with Potrace:", error);
@@ -899,6 +1149,58 @@ document.addEventListener('DOMContentLoaded', () => {
                 reject(error);
             }
         });
+    }
+    
+    // Helper function to enhance edges
+    function enhanceEdges(data, width, height, sensitivity = 1.4) {
+        const output = new Uint8ClampedArray(data.length);
+        // Reduce factor for cleaner lines
+        const factor = Math.min(1.8, Math.max(1.0, sensitivity)); 
+        
+        // Copy original data
+        for (let i = 0; i < data.length; i++) {
+            output[i] = data[i];
+        }
+        
+        // Apply simplified unsharp mask for edge enhancement
+        const kernelSize = 3;
+        const halfKernel = Math.floor(kernelSize / 2);
+        
+        for (let y = halfKernel; y < height - halfKernel; y++) {
+            for (let x = halfKernel; x < width - halfKernel; x++) {
+                // Calculate indices
+                const centerIdx = (y * width + x) * 4;
+                
+                // Calculate local average (3x3 neighborhood)
+                let rSum = 0;
+                let gSum = 0; 
+                let bSum = 0;
+                let count = 0;
+                
+                for (let ky = -halfKernel; ky <= halfKernel; ky++) {
+                    for (let kx = -halfKernel; kx <= halfKernel; kx++) {
+                        const idx = ((y + ky) * width + (x + kx)) * 4;
+                        rSum += data[idx];
+                        gSum += data[idx + 1];
+                        bSum += data[idx + 2];
+                        count++;
+                    }
+                }
+                
+                const rAvg = rSum / count;
+                const gAvg = gSum / count;
+                const bAvg = bSum / count;
+                
+                // Apply gentler unsharp mask: Original + factor * (Original - Blurred)
+                output[centerIdx] = Math.min(255, Math.max(0, data[centerIdx] + factor * (data[centerIdx] - rAvg)));
+                output[centerIdx + 1] = Math.min(255, Math.max(0, data[centerIdx + 1] + factor * (data[centerIdx + 1] - gAvg)));
+                output[centerIdx + 2] = Math.min(255, Math.max(0, data[centerIdx + 2] + factor * (data[centerIdx + 2] - bAvg)));
+                // Keep alpha unchanged
+                output[centerIdx + 3] = data[centerIdx + 3];
+            }
+        }
+        
+        return output;
     }
     
     // Helper function to create error SVG
@@ -918,49 +1220,30 @@ document.addEventListener('DOMContentLoaded', () => {
         updateStatus(`Error: ${error.message}`, false);
     }
     
-    // Helper functions for image processing that are still used by Potrace
-    // Pre-process image to enhance edge detection
-    function preprocessImage(imageData, blurRadius) {
-        const width = imageData.width;
-        const height = imageData.height;
-        const data = new Uint8ClampedArray(imageData.data);
-        const processedData = new ImageData(data, width, height);
-        const processedPixels = processedData.data;
+    // Helper functions for image processing
+    function applyBlur(pixels, width, height, radius, highQuality = false) {
+        if (radius <= 0.5) return;
         
-        // Apply Gaussian blur to reduce noise
-        if (blurRadius > 0) {
-            applyGaussianBlur(processedPixels, width, height, blurRadius);
-        }
-        
-        // Enhance contrast
-        enhanceContrast(processedPixels, width, height);
-        
-        return processedData;
-    }
-
-    // Apply Gaussian blur to reduce noise
-    function applyGaussianBlur(pixels, width, height, radius) {
-        // Ensure radius is an integer for the algorithm
-        const intRadius = Math.floor(radius);
-        if (intRadius <= 0) return;
-        
-        // Create a temporary array to hold intermediate results
         const temp = new Uint8ClampedArray(pixels.length);
         
-        // Copy original pixels to the temp array
+        // Copy original pixels to temp array
         for (let i = 0; i < pixels.length; i++) {
             temp[i] = pixels[i];
         }
         
+        const intRadius = Math.floor(radius);
+        const skipPixels = highQuality ? 1 : 2; // Skip pixels for performance in fast mode
+        
         // Horizontal pass
         for (let y = 0; y < height; y++) {
             for (let x = 0; x < width; x++) {
+                // Fix linter error by declaring variables separately
                 let r = 0;
                 let g = 0;
                 let b = 0;
                 let count = 0;
                 
-                for (let i = -intRadius; i <= intRadius; i++) {
+                for (let i = -intRadius; i <= intRadius; i += skipPixels) {
                     const nx = Math.min(Math.max(x + i, 0), width - 1);
                     const idx = (y * width + nx) * 4;
                     
@@ -974,24 +1257,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 pixels[outIdx] = Math.round(r / count);
                 pixels[outIdx + 1] = Math.round(g / count);
                 pixels[outIdx + 2] = Math.round(b / count);
-                // Don't modify alpha
             }
         }
         
-        // Copy blurred pixels back to temp for the vertical pass
+        // Copy blurred pixels back to temp for vertical pass
         for (let i = 0; i < pixels.length; i++) {
             temp[i] = pixels[i];
         }
         
         // Vertical pass
-        for (let y = 0; y < height; y++) {
+        for (let y = 0; y < height; y += 1) {
             for (let x = 0; x < width; x++) {
+                // Fix linter error by declaring variables separately 
                 let r = 0;
                 let g = 0;
                 let b = 0;
                 let count = 0;
                 
-                for (let j = -intRadius; j <= intRadius; j++) {
+                for (let j = -intRadius; j <= intRadius; j += skipPixels) {
                     const ny = Math.min(Math.max(y + j, 0), height - 1);
                     const idx = (ny * width + x) * 4;
                     
@@ -1005,34 +1288,135 @@ document.addEventListener('DOMContentLoaded', () => {
                 pixels[outIdx] = Math.round(r / count);
                 pixels[outIdx + 1] = Math.round(g / count);
                 pixels[outIdx + 2] = Math.round(b / count);
-                // Don't modify alpha
             }
         }
     }
     
-    // Enhance contrast in the image
-    function enhanceContrast(pixels, width, height) {
-        // Find min/max values
-        let min = 255;
-        let max = 0;
+    function applyThreshold(data, width, height, threshold, invertColors, useAdaptive = false) {
+        const binaryData = new Uint8ClampedArray(data.length);
         
-        for (let i = 0; i < pixels.length; i += 4) {
-            const gray = 0.299 * pixels[i] + 0.587 * pixels[i + 1] + 0.114 * pixels[i + 2];
-            min = Math.min(min, gray);
-            max = Math.max(max, gray);
-        }
-        
-        // Apply contrast stretching if range is sufficient
-        if (max > min) {
-            const range = max - min;
-            const factor = 255 / range;
+        if (useAdaptive) {
+            // Adaptive threshold - higher quality but slower
+            const windowSize = 11; // Smaller window size for simpler lines
+            const halfWindow = Math.floor(windowSize / 2);
             
-            for (let i = 0; i < pixels.length; i += 4) {
-                for (let c = 0; c < 3; c++) {
-                    pixels[i + c] = Math.min(255, Math.max(0, Math.round((pixels[i + c] - min) * factor)));
+            // Calculate local thresholds
+            for (let y = 0; y < height; y++) {
+                for (let x = 0; x < width; x++) {
+                    let sum = 0;
+                    let count = 0;
+                    
+                    // Calculate local average with a bias towards global threshold
+                    for (let wy = Math.max(0, y - halfWindow); wy <= Math.min(height - 1, y + halfWindow); wy++) {
+                        for (let wx = Math.max(0, x - halfWindow); wx <= Math.min(width - 1, x + halfWindow); wx++) {
+                            const i = (wy * width + wx) * 4;
+                            const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+                            sum += gray;
+                            count++;
+                        }
+                    }
+                    
+                    // Mix local and global thresholds (60% global, 40% local) for more consistent results
+                    const localAvg = sum / count;
+                    const localThreshold = (0.4 * localAvg + 0.6 * threshold);
+                    
+                    // Get current pixel grayscale value
+                    const idx = (y * width + x) * 4;
+                    const gray = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+                    
+                    // Apply thresholding with slight hysteresis to prevent small fluctuations
+                    const grayDiff = Math.abs(gray - localThreshold);
+                    const isBlack = gray < localThreshold && grayDiff > 2; // Add hysteresis threshold
+                    
+                    // Set pixel value (consider invert setting)
+                    const pixelValue = invertColors ? !isBlack : isBlack;
+                    
+                    // Set all channels to black or white
+                    const value = pixelValue ? 0 : 255;
+                    binaryData[idx] = value;
+                    binaryData[idx + 1] = value;
+                    binaryData[idx + 2] = value;
+                    binaryData[idx + 3] = 255; // Full alpha
                 }
             }
+        } else {
+            // Simple global threshold - faster for interactive updates
+            for (let i = 0; i < data.length; i += 4) {
+                const r = data[i];
+                const g = data[i + 1];
+                const b = data[i + 2];
+                
+                // Convert to grayscale
+                const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+                
+                // Apply threshold
+                const isBlack = gray < threshold;
+                
+                // Set pixel value (consider invert setting)
+                const pixelValue = invertColors ? !isBlack : isBlack;
+                
+                // Set all channels to black or white
+                const value = pixelValue ? 0 : 255;
+                binaryData[i] = value;
+                binaryData[i + 1] = value;
+                binaryData[i + 2] = value;
+                binaryData[i + 3] = 255; // Full alpha
+            }
         }
+        
+        return binaryData;
+    }
+    
+    // Helper functions for SVG optimization
+    function optimizeSvgPath(pathData) {
+        // Skip optimization if no path data
+        if (!pathData) return pathData;
+        
+        // 1. Reduce precision of decimal points (reduce from 3 to 1 decimal places)
+        let optimized = pathData.replace(/(\d+\.\d{1,6})/g, match => {
+            const num = Number.parseFloat(match);
+            return num.toFixed(1); // Reduce to 1 decimal place
+        });
+        
+        // 2. Remove redundant zeros after decimal point
+        optimized = optimized.replace(/(\d+)\.0(?=\s|,|$)/g, '$1');
+        
+        // 3. Remove multiple consecutive spaces
+        optimized = optimized.replace(/\s{2,}/g, ' ');
+        
+        // 4. Remove spaces after commands (e.g., "M 10" -> "M10")
+        optimized = optimized.replace(/([MLHVCSQTAZmlhvcsqtaz])\s+/g, '$1');
+        
+        // 5. Remove spaces before commands
+        optimized = optimized.replace(/\s+([MLHVCSQTAZmlhvcsqtaz])/g, '$1');
+        
+        return optimized;
+    }
+
+    function optimizeSvgString(svgString) {
+        // 1. Remove XML declaration if present (not needed for modern browsers)
+        let optimized = svgString.replace(/<\?xml[^>]*>\s*/g, '');
+        
+        // 2. Remove comments
+        optimized = optimized.replace(/<!--[\s\S]*?-->/g, '');
+        
+        // 3. Remove unnecessary attributes
+        optimized = optimized.replace(/\s+version="[^"]*"/g, '');
+        
+        // 4. Set minimal precision for all numbers in attributes
+        optimized = optimized.replace(/(\d+\.\d{1,6})(?=\s|"|'|,)/g, match => {
+            const num = Number.parseFloat(match);
+            return num.toFixed(1); // Reduce to 1 decimal place
+        });
+        
+        // 5. Remove redundant zeros after decimal point in attributes
+        optimized = optimized.replace(/(\d+)\.0(?=\s|"|'|,)/g, '$1');
+        
+        // 6. Remove unnecessary spaces
+        optimized = optimized.replace(/\s{2,}/g, ' ');
+        optimized = optimized.replace(/>\s+</g, '><');
+        
+        return optimized;
     }
 });
 

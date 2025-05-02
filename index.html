@@ -271,6 +271,22 @@
             display: block;
         }
         
+        /* Style for the mobile detailed rendering toggle */
+        .mobile-detail-toggle {
+            display: none; /* Hidden by default */
+            margin-top: 8px;
+            padding: 6px 8px;
+            font-size: 12px;
+            background-color: #e8f0fe; /* Lighter blue */
+            border: 1px solid #cddfed; /* Corrected color code */
+            border-radius: 4px; /* Added border radius */
+        }
+        .mobile-detail-toggle input {
+            width: 15px;
+            height: 15px;
+            margin-right: 6px;
+        }
+        
         @media (min-width: 600px) {
             .preview-container {
                 grid-template-columns: repeat(3, 1fr);
@@ -278,6 +294,14 @@
             
             .preview-content {
                 height: 150px;
+            }
+            /* Keep the toggle hidden on larger screens - no rule needed here as default is hidden */
+        }
+        
+        @media (max-width: 767px) {
+            /* Show the toggle only on smaller screens (mobile) */
+            .mobile-detail-toggle {
+                display: flex;
             }
         }
         
@@ -374,6 +398,11 @@
                             </div>
                             <input type="range" id="thresholdSlider" min="0" max="255" value="120">
                             <div class="info-text">Lower values detect more edges</div>
+                        </div>
+                        <!-- Add checkbox for detailed processing on mobile -->
+                        <div class="checkbox-label mobile-detail-toggle">
+                            <input type="checkbox" id="enableDetailedMobileToggle">
+                            <span>Detailed Render</span>
                         </div>
                     </div>
                     
@@ -497,6 +526,8 @@
     </div>
 
     <!-- Load the required libraries -->
+    <script src="debug-message.js"></script>
+    <script src="mobile-optimizations.js"></script> 
     <script src="potrace.js" defer></script>
     <script src="potrace-demo.js" defer></script>
     
