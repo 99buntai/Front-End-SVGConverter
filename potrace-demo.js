@@ -58,7 +58,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const defaultSettings = {
-        threshold: 120,
+        threshold: 128,
         invertColors: false,
         brightness: 0,
         contrast: 0

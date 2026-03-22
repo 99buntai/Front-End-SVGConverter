@@ -18,151 +18,100 @@
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = e => {
-        if (file.type === 'image/svg+xml' || file.name.toLowerCase().endsWith('.svg')) {
-          const svgText = e.target.result;
-          const parser = new DOMParser();
-          const doc = parser.parseFromString(svgText, 'image/svg+xml');
-          const svgEl = doc.querySelector('svg');
-          if (!svgEl) { reject(new Error('Invalid SVG: ' + file.name)); return; }
-
-          let w = parseFloat(svgEl.getAttribute('width'));
-          let h = parseFloat(svgEl.getAttribute('height'));
-          const vb = svgEl.getAttribute('viewBox');
-          if ((!w || !h) && vb) {
-            const parts = vb.split(/[\s,]+/);
-            w = parseFloat(parts[2]) || 300;
-            h = parseFloat(parts[3]) || 300;
-          }
-          w = w || 300;
-          h = h || 300;
-
-          svgEl.setAttribute('width', w);
-          svgEl.setAttribute('height', h);
-
-          const blob = new Blob([new XMLSerializer().serializeToString(svgEl)], { type: 'image/svg+xml' });
-          const url = URL.createObjectURL(blob);
-          const img = new Image();
-          img.onload = () => {
-            URL.revokeObjectURL(url);
-            resolve(img);
-          };
-          img.onerror = () => {
-            URL.revokeObjectURL(url);
-            reject(new Error('Failed to render SVG: ' + file.name));
-          };
-          img.src = url;
-        } else {
-          const img = new Image();
-          img.onload = () => resolve(img);
-          img.onerror = () => reject(new Error('Failed to load image: ' + file.name));
-          img.src = e.target.result;
-        }
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error('Failed to load image: ' + file.name));
+        img.src = e.target.result;
       };
       reader.onerror = () => reject(new Error('Failed to read file: ' + file.name));
-      if (file.type === 'image/svg+xml' || file.name.toLowerCase().endsWith('.svg')) {
-        reader.readAsText(file);
-      } else {
-        reader.readAsDataURL(file);
-      }
+      reader.readAsDataURL(file);
     });
   }
 
-  var batchTraceQueue = Promise.resolve();
-
   function traceWithPotrace(img, params) {
-    batchTraceQueue = batchTraceQueue.then(() => doTrace(img, params));
-    return batchTraceQueue;
-  }
+    const pc = document.createElement('canvas');
+    const pctx = pc.getContext('2d', { willReadFrequently: true });
+    pc.width = img.naturalWidth;
+    pc.height = img.naturalHeight;
+    pctx.drawImage(img, 0, 0, pc.width, pc.height);
 
-  function doTrace(img, params) {
+    const imageData = pctx.getImageData(0, 0, pc.width, pc.height);
+    const data = imageData.data;
+
+    const brightnessFactor = 1 + params.brightness / 100;
+    const contrastFactor = (100 + params.contrast) / 100;
+
+    for (let i = 0; i < data.length; i += 4) {
+      let r = data[i];
+      let g = data[i + 1];
+      let b = data[i + 2];
+      const alpha = data[i + 3];
+
+      if (alpha < 255) {
+        const alphaFactor = alpha / 255;
+        r = Math.round(r * alphaFactor + 255 * (1 - alphaFactor));
+        g = Math.round(g * alphaFactor + 255 * (1 - alphaFactor));
+        b = Math.round(b * alphaFactor + 255 * (1 - alphaFactor));
+        data[i + 3] = 255;
+      }
+
+      if (params.brightness !== 0) {
+        r *= brightnessFactor;
+        g *= brightnessFactor;
+        b *= brightnessFactor;
+      }
+
+      if (params.contrast !== 0) {
+        r = ((r / 255 - 0.5) * contrastFactor + 0.5) * 255;
+        g = ((g / 255 - 0.5) * contrastFactor + 0.5) * 255;
+        b = ((b / 255 - 0.5) * contrastFactor + 0.5) * 255;
+      }
+
+      r = Math.min(255, Math.max(0, Math.round(r)));
+      g = Math.min(255, Math.max(0, Math.round(g)));
+      b = Math.min(255, Math.max(0, Math.round(b)));
+
+      const gray = r * 0.299 + g * 0.587 + b * 0.114;
+      let value = gray < params.threshold ? 0 : 255;
+
+      if (params.invertColors) value = 255 - value;
+
+      data[i] = value;
+      data[i + 1] = value;
+      data[i + 2] = value;
+    }
+
+    pctx.putImageData(imageData, 0, 0);
+
+    Potrace.setParameter({
+      turdsize: 1,
+      alphamax: 0.7,
+      optcurve: true,
+      opttolerance: 0.15,
+      turnpolicy: 'minority'
+    });
+    Potrace.loadImageFromCanvas(pc);
+
     return new Promise((resolve, reject) => {
       try {
-        const pc = document.createElement('canvas');
-        const pctx = pc.getContext('2d', { willReadFrequently: true });
-        pc.width = img.naturalWidth || img.width || 300;
-        pc.height = img.naturalHeight || img.height || 300;
-        if (pc.width === 0 || pc.height === 0) { reject(new Error('Image has zero dimensions')); return; }
-        pctx.drawImage(img, 0, 0, pc.width, pc.height);
-
-        const imageData = pctx.getImageData(0, 0, pc.width, pc.height);
-        const data = imageData.data;
-
-        const brightnessFactor = 1 + params.brightness / 100;
-        const contrastFactor = (100 + params.contrast) / 100;
-
-        for (let i = 0; i < data.length; i += 4) {
-          let r = data[i];
-          let g = data[i + 1];
-          let b = data[i + 2];
-          const alpha = data[i + 3];
-
-          if (alpha < 255) {
-            const alphaFactor = alpha / 255;
-            r = Math.round(r * alphaFactor + 255 * (1 - alphaFactor));
-            g = Math.round(g * alphaFactor + 255 * (1 - alphaFactor));
-            b = Math.round(b * alphaFactor + 255 * (1 - alphaFactor));
-            data[i + 3] = 255;
-          }
-
-          if (params.brightness !== 0) {
-            r *= brightnessFactor;
-            g *= brightnessFactor;
-            b *= brightnessFactor;
-          }
-
-          if (params.contrast !== 0) {
-            r = ((r / 255 - 0.5) * contrastFactor + 0.5) * 255;
-            g = ((g / 255 - 0.5) * contrastFactor + 0.5) * 255;
-            b = ((b / 255 - 0.5) * contrastFactor + 0.5) * 255;
-          }
-
-          r = Math.min(255, Math.max(0, Math.round(r)));
-          g = Math.min(255, Math.max(0, Math.round(g)));
-          b = Math.min(255, Math.max(0, Math.round(b)));
-
-          const gray = r * 0.299 + g * 0.587 + b * 0.114;
-          let value = gray < params.threshold ? 0 : 255;
-
-          if (params.invertColors) value = 255 - value;
-
-          data[i] = value;
-          data[i + 1] = value;
-          data[i + 2] = value;
-        }
-
-        pctx.putImageData(imageData, 0, 0);
-
-        Potrace.setParameter({
-          turdsize: 1,
-          alphamax: 0.7,
-          optcurve: true,
-          opttolerance: 0.15,
-          turnpolicy: 'minority'
-        });
-        Potrace.loadImageFromCanvas(pc);
-
-        setTimeout(() => {
+        Potrace.process(() => {
           try {
-            Potrace.process(() => {
-              try {
-                const raw = Potrace.getSVG(1);
-                const parser = new DOMParser();
-                const doc = parser.parseFromString(raw, 'image/svg+xml');
-                const srcSvg = doc.querySelector('svg');
-                const w = srcSvg ? srcSvg.getAttribute('width') : pc.width;
-                const h = srcSvg ? srcSvg.getAttribute('height') : pc.height;
+            const raw = Potrace.getSVG(1);
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(raw, 'image/svg+xml');
+            const srcSvg = doc.querySelector('svg');
+            const w = srcSvg ? srcSvg.getAttribute('width') : pc.width;
+            const h = srcSvg ? srcSvg.getAttribute('height') : pc.height;
 
-                const pathEl = doc.querySelector('path');
-                const pathD = pathEl ? optimizePath(pathEl.getAttribute('d') || '') : '';
+            const pathEl = doc.querySelector('path');
+            const pathD = pathEl ? optimizePath(pathEl.getAttribute('d') || '') : '';
 
-                let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}">`;
-                svg += `<path d="${pathD}" fill="#000" fill-rule="evenodd"/>`;
-                svg += '</svg>';
-                resolve(svg);
-              } catch (err) { reject(err); }
-            });
+            let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}">`;
+            svg += `<path d="${pathD}" fill="#000" fill-rule="evenodd"/>`;
+            svg += '</svg>';
+            resolve(svg);
           } catch (err) { reject(err); }
-        }, 50);
+        });
       } catch (err) { reject(err); }
     });
   }
@@ -216,7 +165,7 @@
     clearBtn.addEventListener('click', clearBatch);
 
     function addFiles(files) {
-      const images = files.filter(f => f.type.match('image.*') || f.name.toLowerCase().endsWith('.svg'));
+      const images = files.filter(f => f.type.match('image.*'));
       if (!images.length) return;
       batchFiles.push(...images);
       renderFileList();
