@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Image to SVG Line Art Playground</title>
+    <title>Image to SVG Converter</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
@@ -41,20 +41,8 @@
         .preview-container {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            grid-template-areas: 
-                "original original"
-                "lineart silhouette";
             gap: 10px;
             margin: 15px 0;
-        }
-        .preview-panel.original {
-            grid-area: original;
-        }
-        .preview-panel.lineart {
-            grid-area: lineart;
-        }
-        .preview-panel.silhouette {
-            grid-area: silhouette;
         }
         .preview-panel {
             border: 1px solid #ddd;
@@ -75,14 +63,11 @@
             text-align: center;
         }
         .preview-content {
-            height: 150px;
+            height: 200px;
             display: flex;
             align-items: center;
             justify-content: center;
             overflow: hidden;
-        }
-        .original .preview-content {
-            height: 160px;
         }
         .preview-panel button {
             position: absolute;
@@ -233,61 +218,26 @@
             margin-top: 1px;
             line-height: 1.2;
         }
-        .section-divider {
-            margin: 15px 0;
-            border-top: 1px dashed #ddd;
-            padding-top: 5px;
-        }
         .section-title {
             font-weight: 500;
             color: #4e77cc;
             margin-bottom: 12px;
             font-size: 16px;
         }
-        .tab-buttons {
-            display: flex;
-            margin-bottom: 15px;
-            border-bottom: 1px solid #ddd;
-        }
-        .tab-button {
-            background-color: #f0f0f0;
-            border: none;
-            padding: 10px 15px;
-            cursor: pointer;
-            flex: 1;
-            text-align: center;
-            font-weight: 500;
-            color: #666;
-            border-radius: 5px 5px 0 0;
-        }
-        .tab-button.active {
-            background-color: #4e77cc;
-            color: white;
-        }
-        .tab-content {
-            display: none;
-        }
-        .tab-content.active {
-            display: block;
-        }
-        
-        /* Style for the mobile detailed rendering toggle */
         .mobile-detail-toggle {
-            display: none; /* Hidden by default */
+            display: none;
             margin-top: 8px;
             padding: 6px 8px;
             font-size: 12px;
-            background-color: #e8f0fe; /* Lighter blue */
-            border: 1px solid #cddfed; /* Corrected color code */
-            border-radius: 4px; /* Added border radius */
+            background-color: #e8f0fe;
+            border: 1px solid #cddfed;
+            border-radius: 4px;
         }
         .mobile-detail-toggle input {
             width: 15px;
             height: 15px;
             margin-right: 6px;
         }
-        
-        /* Batch processing styles */
         .batch-section {
             background-color: #f9f9f9;
             border: 1px solid #ddd;
@@ -339,13 +289,6 @@
             align-items: center;
             flex-wrap: wrap;
             margin-bottom: 10px;
-        }
-        .batch-controls select {
-            padding: 6px 10px;
-            border-radius: 6px;
-            border: 1px solid #ddd;
-            font-size: 13px;
-            background: white;
         }
         .batch-controls button {
             padding: 6px 14px;
@@ -414,24 +357,12 @@
             min-height: 16px;
         }
 
-        @media (min-width: 600px) {
-            .preview-container {
-                grid-template-columns: repeat(3, 1fr);
-            }
-            
-            .preview-content {
-                height: 150px;
-            }
-            /* Keep the toggle hidden on larger screens - no rule needed here as default is hidden */
-        }
-        
         @media (max-width: 767px) {
-            /* Show the toggle only on smaller screens (mobile) */
             .mobile-detail-toggle {
                 display: flex;
             }
         }
-        
+
         @media (min-width: 768px) {
             body {
                 padding: 20px;
@@ -441,21 +372,14 @@
                 font-size: 28px;
                 margin-bottom: 25px;
             }
-            .preview-container {
-                grid-template-columns: repeat(3, 1fr);
-                grid-template-areas: "original lineart silhouette";
+            .preview-content {
+                height: 250px;
             }
-            
-            .preview-content, .original .preview-content {
-                height: 200px;
-            }
-            
             .preview-panel h3 {
                 padding: 10px 15px;
                 font-size: 16px;
                 text-align: left;
             }
-            
             .preview-panel button {
                 padding: 8px 12px;
                 font-size: 14px;
@@ -478,180 +402,82 @@
     </style>
 </head>
 <body>
-    <h1>Image to SVG Line Art Playground</h1>
-    
+    <h1>Image to SVG Converter</h1>
+
     <div class="upload-container" id="uploadContainer">
         <p>Click or drag an image here to upload</p>
         <input type="file" id="fileInput" accept="image/*">
     </div>
-    
-    <!-- Preview section with compact layout for mobile -->
+
     <div class="preview-container">
-        <div class="preview-panel original">
+        <div class="preview-panel">
             <h3>Original</h3>
             <div id="originalPreview" class="preview-content"></div>
         </div>
-        
-        <div class="preview-panel lineart">
-            <h3>Line Art</h3>
-            <div id="svgPreview" class="preview-content"></div>
-            <button id="downloadBtn" disabled>Download</button>
-        </div>
-        
-        <div class="preview-panel silhouette">
-            <h3>Silhouette</h3>
+
+        <div class="preview-panel">
+            <h3>SVG Output</h3>
             <div id="silhouettePreview" class="preview-content"></div>
             <button id="downloadSilhouetteBtn" disabled>Download</button>
         </div>
     </div>
-    
-    <!-- Controls section after previews -->
-    <div class="controls">
-        <div class="tab-buttons">
-            <button class="tab-button active" data-tab="basic">Vector Parameter</button>
-            <button class="tab-button" data-tab="image">Image Parameter</button>
-        </div>
-        
-        <!-- Vector Parameter Tab (renamed from Basic) -->
-        <div id="basic-tab" class="tab-content active">
-            <div class="controls-group">
-                <div class="controls-grid">
-                    <div class="control-item">
-                        <div class="slider-control">
-                            <div class="slider-label">
-                                <span>Edge Threshold</span>
-                                <span id="thresholdValue">120</span>
-                            </div>
-                            <input type="range" id="thresholdSlider" min="0" max="255" value="120">
-                            <div class="info-text">Lower values detect more edges</div>
-                        </div>
-                        <!-- Add checkbox for detailed processing on mobile -->
-                        <div class="checkbox-label mobile-detail-toggle">
-                            <input type="checkbox" id="enableDetailedMobileToggle">
-                            <span>Detailed Render</span>
-                        </div>
-                    </div>
-                    
-                    <div class="control-item">
-                        <div class="slider-control">
-                            <div class="slider-label">
-                                <span>Blur Radius</span>
-                                <span id="blurRadiusValue">1</span>
-                            </div>
-                            <input type="range" id="blurRadiusSlider" min="0.5" max="5" step="0.2" value="1">
-                            <div class="info-text">Reduces noise before processing</div>
-                        </div>
-                    </div>
-                    
-                    <div class="control-item">
-                        <div class="slider-control">
-                            <div class="slider-label">
-                                <span>Edge Sensitivity</span>
-                                <span id="edgeSensitivityValue">1.8</span>
-                            </div>
-                            <input type="range" id="edgeSensitivitySlider" min="0.8" max="5" step="0.1" value="1.8">
-                            <div class="info-text">Affects detail level in both modes</div>
-                        </div>
-                    </div>
-                    
-                    <div class="control-item">
-                        <div class="slider-control">
-                            <div class="slider-label">
-                                <span>Line Thickness</span>
-                                <span id="lineThicknessValue">3</span>
-                            </div>
-                            <input type="range" id="lineThicknessSlider" min="2" max="7" step="0.5" value="3">
-                            <div class="info-text">Only affects Line Art output</div>
-                        </div>
-                    </div>
-                    
-                    <div class="control-item">
-                        <div class="slider-control">
-                            <div class="slider-label">
-                                <span>Line Smoothing</span>
-                                <span id="smoothingValue">80</span>
-                            </div>
-                            <input type="range" id="smoothingSlider" min="0" max="100" value="80">
-                            <div class="info-text">Controls curve smoothness in both modes</div>
-                        </div>
-                    </div>
-                    
-                    <div class="control-item">
-                        <div class="checkbox-label">
-                            <input type="checkbox" id="invertColorsToggle">
-                            <span>Invert color</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <!-- Image Adjustment Tab -->
-        <div id="image-tab" class="tab-content">
-            <div class="controls-group">
-                <div class="controls-grid">
-                    <div class="control-item">
-                        <div class="slider-control">
-                            <div class="slider-label">
-                                <span>Brightness</span>
-                                <span id="brightnessValue">0</span>
-                            </div>
-                            <input type="range" id="brightnessSlider" min="-100" max="100" step="5" value="0">
-                            <div class="info-text">Adjust image brightness</div>
-                        </div>
-                    </div>
-                    
-                    <div class="control-item">
-                        <div class="slider-control">
-                            <div class="slider-label">
-                                <span>Contrast</span>
-                                <span id="contrastValue">0</span>
-                            </div>
-                            <input type="range" id="contrastSlider" min="-100" max="100" step="5" value="0">
-                            <div class="info-text">Adjust image contrast</div>
-                        </div>
-                    </div>
 
-                    <div class="control-item">
-                        <div class="slider-control">
-                            <div class="slider-label">
-                                <span>Brilliance</span>
-                                <span id="brillianceValue">0</span>
-                            </div>
-                            <input type="range" id="brillianceSlider" min="-100" max="100" step="5" value="0">
-                            <div class="info-text">Enhance mid-tones</div>
+    <div class="controls">
+        <div class="controls-group">
+            <div class="controls-grid">
+                <div class="control-item">
+                    <div class="slider-control">
+                        <div class="slider-label">
+                            <span>Threshold</span>
+                            <span id="thresholdValue">120</span>
                         </div>
+                        <input type="range" id="thresholdSlider" min="0" max="255" value="120">
+                        <div class="info-text">Controls black/white cutoff level</div>
                     </div>
-                    
-                    <div class="control-item">
-                        <div class="slider-control">
-                            <div class="slider-label">
-                                <span>Shadows</span>
-                                <span id="shadowsValue">0</span>
-                            </div>
-                            <input type="range" id="shadowsSlider" min="-100" max="100" step="5" value="0">
-                            <div class="info-text">Adjust details in dark areas</div>
-                        </div>
+                    <div class="checkbox-label mobile-detail-toggle">
+                        <input type="checkbox" id="enableDetailedMobileToggle">
+                        <span>Detailed Render</span>
                     </div>
-                    
-                    <div class="control-item">
-                        <div class="checkbox-label">
-                            <input type="checkbox" id="invertSourceToggle">
-                            <span>Invert Source Image</span>
+                </div>
+
+                <div class="control-item">
+                    <div class="checkbox-label">
+                        <input type="checkbox" id="invertColorsToggle">
+                        <span>Invert Colors</span>
+                    </div>
+                </div>
+
+                <div class="control-item">
+                    <div class="slider-control">
+                        <div class="slider-label">
+                            <span>Brightness</span>
+                            <span id="brightnessValue">0</span>
                         </div>
+                        <input type="range" id="brightnessSlider" min="-100" max="100" step="5" value="0">
+                        <div class="info-text">Adjust image brightness</div>
+                    </div>
+                </div>
+
+                <div class="control-item">
+                    <div class="slider-control">
+                        <div class="slider-label">
+                            <span>Contrast</span>
+                            <span id="contrastValue">0</span>
+                        </div>
+                        <input type="range" id="contrastSlider" min="-100" max="100" step="5" value="0">
+                        <div class="info-text">Adjust image contrast</div>
                     </div>
                 </div>
             </div>
         </div>
-        
+
         <div id="statusIndicator" class="status-indicator"></div>
-        
+
         <div class="button-container">
             <button id="resetBtn">Reset Settings</button>
         </div>
     </div>
 
-    <!-- Batch Processing Section -->
     <div class="batch-section" id="batchSection">
         <h2>
             Batch Processing
@@ -664,11 +490,6 @@
             </div>
 
             <div class="batch-controls">
-                <select id="batchModeSelect">
-                    <option value="both">Line Art + Silhouette</option>
-                    <option value="lineart">Line Art only</option>
-                    <option value="silhouette">Silhouette only</option>
-                </select>
                 <button id="batchStartBtn" disabled>Start Batch</button>
                 <button id="batchDownloadBtn" disabled>Download ZIP</button>
                 <button id="batchClearBtn">Clear</button>
@@ -682,33 +503,20 @@
             <div class="batch-progress-text" id="batchProgressText"></div>
 
             <div class="info-text" style="margin-top:8px">
-                Uses current Vector &amp; Image parameters for all files. Outputs download as a ZIP.
+                Uses current parameters for all files. Outputs download as a ZIP.
             </div>
         </div>
     </div>
 
-    <!-- Load the required libraries -->
     <script src="https://cdn.jsdelivr.net/npm/jszip@3/dist/jszip.min.js"></script>
     <script src="debug-message.js"></script>
-    <script src="mobile-optimizations.js"></script> 
+    <script src="mobile-optimizations.js"></script>
     <script src="potrace.js" defer></script>
     <script src="potrace-demo.js" defer></script>
     <script src="batch-processor.js" defer></script>
-    
+
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            var tabButtons = document.querySelectorAll('.tab-button');
-            var tabContents = document.querySelectorAll('.tab-content');
-            tabButtons.forEach(function(button) {
-                button.addEventListener('click', function() {
-                    tabButtons.forEach(function(btn) { btn.classList.remove('active'); });
-                    tabContents.forEach(function(content) { content.classList.remove('active'); });
-                    this.classList.add('active');
-                    var tabId = this.getAttribute('data-tab');
-                    document.getElementById(tabId + '-tab').classList.add('active');
-                });
-            });
-
             var batchToggle = document.getElementById('batchToggle');
             var batchContent = document.getElementById('batchContent');
             if (batchToggle && batchContent) {
@@ -720,4 +528,4 @@
         });
     </script>
 </body>
-</html> 
+</html>
