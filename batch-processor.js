@@ -97,13 +97,14 @@
         Potrace.process(() => {
           try {
             const raw = Potrace.getSVG(1);
-            const wm = raw.match(/width="([^"]+)"/);
-            const hm = raw.match(/height="([^"]+)"/);
-            const w = wm ? parseFloat(wm[1]) : pc.width;
-            const h = hm ? parseFloat(hm[1]) : pc.height;
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(raw, 'image/svg+xml');
+            const srcSvg = doc.querySelector('svg');
+            const w = srcSvg ? srcSvg.getAttribute('width') : pc.width;
+            const h = srcSvg ? srcSvg.getAttribute('height') : pc.height;
 
-            const dm = raw.match(/d="([^"]+)"/);
-            const pathD = dm ? optimizePath(dm[1]) : '';
+            const pathEl = doc.querySelector('path');
+            const pathD = pathEl ? optimizePath(pathEl.getAttribute('d') || '') : '';
 
             let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}">`;
             svg += `<path d="${pathD}" fill="#000" fill-rule="evenodd"/>`;
