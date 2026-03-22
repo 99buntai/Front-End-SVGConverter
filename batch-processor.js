@@ -28,90 +28,101 @@
     });
   }
 
+  var batchTraceQueue = Promise.resolve();
+
   function traceWithPotrace(img, params) {
-    const pc = document.createElement('canvas');
-    const pctx = pc.getContext('2d', { willReadFrequently: true });
-    pc.width = img.naturalWidth;
-    pc.height = img.naturalHeight;
-    pctx.drawImage(img, 0, 0, pc.width, pc.height);
+    batchTraceQueue = batchTraceQueue.then(() => doTrace(img, params));
+    return batchTraceQueue;
+  }
 
-    const imageData = pctx.getImageData(0, 0, pc.width, pc.height);
-    const data = imageData.data;
-
-    const brightnessFactor = 1 + params.brightness / 100;
-    const contrastFactor = (100 + params.contrast) / 100;
-
-    for (let i = 0; i < data.length; i += 4) {
-      let r = data[i];
-      let g = data[i + 1];
-      let b = data[i + 2];
-      const alpha = data[i + 3];
-
-      if (alpha < 255) {
-        const alphaFactor = alpha / 255;
-        r = Math.round(r * alphaFactor + 255 * (1 - alphaFactor));
-        g = Math.round(g * alphaFactor + 255 * (1 - alphaFactor));
-        b = Math.round(b * alphaFactor + 255 * (1 - alphaFactor));
-        data[i + 3] = 255;
-      }
-
-      if (params.brightness !== 0) {
-        r *= brightnessFactor;
-        g *= brightnessFactor;
-        b *= brightnessFactor;
-      }
-
-      if (params.contrast !== 0) {
-        r = ((r / 255 - 0.5) * contrastFactor + 0.5) * 255;
-        g = ((g / 255 - 0.5) * contrastFactor + 0.5) * 255;
-        b = ((b / 255 - 0.5) * contrastFactor + 0.5) * 255;
-      }
-
-      r = Math.min(255, Math.max(0, Math.round(r)));
-      g = Math.min(255, Math.max(0, Math.round(g)));
-      b = Math.min(255, Math.max(0, Math.round(b)));
-
-      const gray = r * 0.299 + g * 0.587 + b * 0.114;
-      let value = gray < params.threshold ? 0 : 255;
-
-      if (params.invertColors) value = 255 - value;
-
-      data[i] = value;
-      data[i + 1] = value;
-      data[i + 2] = value;
-    }
-
-    pctx.putImageData(imageData, 0, 0);
-
-    Potrace.setParameter({
-      turdsize: 1,
-      alphamax: 0.7,
-      optcurve: true,
-      opttolerance: 0.15,
-      turnpolicy: 'minority'
-    });
-    Potrace.loadImageFromCanvas(pc);
-
+  function doTrace(img, params) {
     return new Promise((resolve, reject) => {
       try {
-        Potrace.process(() => {
-          try {
-            const raw = Potrace.getSVG(1);
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(raw, 'image/svg+xml');
-            const srcSvg = doc.querySelector('svg');
-            const w = srcSvg ? srcSvg.getAttribute('width') : pc.width;
-            const h = srcSvg ? srcSvg.getAttribute('height') : pc.height;
+        const pc = document.createElement('canvas');
+        const pctx = pc.getContext('2d', { willReadFrequently: true });
+        pc.width = img.naturalWidth;
+        pc.height = img.naturalHeight;
+        pctx.drawImage(img, 0, 0, pc.width, pc.height);
 
-            const pathEl = doc.querySelector('path');
-            const pathD = pathEl ? optimizePath(pathEl.getAttribute('d') || '') : '';
+        const imageData = pctx.getImageData(0, 0, pc.width, pc.height);
+        const data = imageData.data;
 
-            let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}">`;
-            svg += `<path d="${pathD}" fill="#000" fill-rule="evenodd"/>`;
-            svg += '</svg>';
-            resolve(svg);
-          } catch (err) { reject(err); }
+        const brightnessFactor = 1 + params.brightness / 100;
+        const contrastFactor = (100 + params.contrast) / 100;
+
+        for (let i = 0; i < data.length; i += 4) {
+          let r = data[i];
+          let g = data[i + 1];
+          let b = data[i + 2];
+          const alpha = data[i + 3];
+
+          if (alpha < 255) {
+            const alphaFactor = alpha / 255;
+            r = Math.round(r * alphaFactor + 255 * (1 - alphaFactor));
+            g = Math.round(g * alphaFactor + 255 * (1 - alphaFactor));
+            b = Math.round(b * alphaFactor + 255 * (1 - alphaFactor));
+            data[i + 3] = 255;
+          }
+
+          if (params.brightness !== 0) {
+            r *= brightnessFactor;
+            g *= brightnessFactor;
+            b *= brightnessFactor;
+          }
+
+          if (params.contrast !== 0) {
+            r = ((r / 255 - 0.5) * contrastFactor + 0.5) * 255;
+            g = ((g / 255 - 0.5) * contrastFactor + 0.5) * 255;
+            b = ((b / 255 - 0.5) * contrastFactor + 0.5) * 255;
+          }
+
+          r = Math.min(255, Math.max(0, Math.round(r)));
+          g = Math.min(255, Math.max(0, Math.round(g)));
+          b = Math.min(255, Math.max(0, Math.round(b)));
+
+          const gray = r * 0.299 + g * 0.587 + b * 0.114;
+          let value = gray < params.threshold ? 0 : 255;
+
+          if (params.invertColors) value = 255 - value;
+
+          data[i] = value;
+          data[i + 1] = value;
+          data[i + 2] = value;
+        }
+
+        pctx.putImageData(imageData, 0, 0);
+
+        Potrace.setParameter({
+          turdsize: 1,
+          alphamax: 0.7,
+          optcurve: true,
+          opttolerance: 0.15,
+          turnpolicy: 'minority'
         });
+        Potrace.loadImageFromCanvas(pc);
+
+        setTimeout(() => {
+          try {
+            Potrace.process(() => {
+              try {
+                const raw = Potrace.getSVG(1);
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(raw, 'image/svg+xml');
+                const srcSvg = doc.querySelector('svg');
+                const w = srcSvg ? srcSvg.getAttribute('width') : pc.width;
+                const h = srcSvg ? srcSvg.getAttribute('height') : pc.height;
+
+                const pathEl = doc.querySelector('path');
+                const pathD = pathEl ? optimizePath(pathEl.getAttribute('d') || '') : '';
+
+                let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}">`;
+                svg += `<path d="${pathD}" fill="#000" fill-rule="evenodd"/>`;
+                svg += '</svg>';
+                resolve(svg);
+              } catch (err) { reject(err); }
+            });
+          } catch (err) { reject(err); }
+        }, 50);
       } catch (err) { reject(err); }
     });
   }
