@@ -1,17 +1,17 @@
 (function () {
   'use strict';
 
-  function optimizeSvgString(svg) {
-    return svg
-      .replace(/<!--[\s\S]*?-->/g, '')
-      .replace(/>\s+</g, '><')
-      .trim()
-      .replace(/<g>\s*<\/g>/g, '')
-      .replace(/<title[^>]*>[\s\S]*?<\/title>/gi, '')
-      .replace(/<desc[^>]*>[\s\S]*?<\/desc>/gi, '')
-      .replace(/<metadata[^>]*>[\s\S]*?<\/metadata>/gi, '')
+  function optimizePath(d) {
+    if (!d) return d;
+    return d
+      .replace(/(\d+)\.(\d)\d+/g, '$1.$2')
+      .replace(/(\d+)\.0(?=\s|,|[A-Za-z]|$)/g, '$1')
       .replace(/\s{2,}/g, ' ')
-      .replace(/(\d+\.\d{3,})/g, (match) => parseFloat(match).toFixed(2));
+      .replace(/([MCLHVSQTAZmclhvsqtaz])\s+/g, '$1')
+      .replace(/\s+([MCLHVSQTAZmclhvsqtaz])/g, '$1')
+      .replace(/,\s+/g, ',')
+      .replace(/\s+,/g, ',')
+      .trim();
   }
 
   function loadImageFromFile(file) {
@@ -96,15 +96,19 @@
       try {
         Potrace.process(() => {
           try {
-            let svg = Potrace.getSVG(1);
+            const raw = Potrace.getSVG(1);
+            const wm = raw.match(/width="([^"]+)"/);
+            const hm = raw.match(/height="([^"]+)"/);
+            const w = wm ? parseFloat(wm[1]) : pc.width;
+            const h = hm ? parseFloat(hm[1]) : pc.height;
 
-            const wm = svg.match(/width="([^"]+)"/);
-            const hm = svg.match(/height="([^"]+)"/);
-            if (wm && hm && svg.indexOf('viewBox') === -1) {
-              svg = svg.replace('<svg', `<svg viewBox="0 0 ${parseFloat(wm[1])} ${parseFloat(hm[1])}"`);
-            }
+            const dm = raw.match(/d="([^"]+)"/);
+            const pathD = dm ? optimizePath(dm[1]) : '';
 
-            resolve(optimizeSvgString(svg));
+            let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}">`;
+            svg += `<path d="${pathD}" fill="#000" fill-rule="evenodd"/>`;
+            svg += '</svg>';
+            resolve(svg);
           } catch (err) { reject(err); }
         });
       } catch (err) { reject(err); }

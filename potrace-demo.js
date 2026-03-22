@@ -226,49 +226,43 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const parser = new DOMParser();
             const svgDoc = parser.parseFromString(svgData, 'image/svg+xml');
-            const svgElement = svgDoc.querySelector('svg');
+            const srcSvg = svgDoc.querySelector('svg');
+            if (!srcSvg) throw new Error("Could not parse SVG for download");
 
-            if (!svgElement) {
-                throw new Error("Could not parse SVG for download");
+            const w = srcSvg.getAttribute('width');
+            const h = srcSvg.getAttribute('height');
+
+            const pathEls = svgDoc.querySelectorAll('path');
+            let combinedD = '';
+            for (const p of pathEls) {
+                const d = p.getAttribute('d');
+                if (d) combinedD += d;
             }
 
-            const paths = svgDoc.querySelectorAll('path');
-            const cleanSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            combinedD = optimizePath(combinedD);
 
-            for (const attr of Array.from(svgElement.attributes)) {
-                cleanSvg.setAttribute(attr.name, attr.value);
-            }
+            let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}">`;
+            svg += `<path d="${combinedD}" fill="#000" fill-rule="evenodd"/>`;
+            svg += '</svg>';
 
-            for (const path of paths) {
-                const clonedPath = path.cloneNode(true);
-                clonedPath.setAttribute('fill', 'black');
-                clonedPath.removeAttribute('stroke');
-                cleanSvg.appendChild(clonedPath);
-            }
-
-            if (invertColorsToggle.checked) {
-                const bgRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-                bgRect.setAttribute('width', '100%');
-                bgRect.setAttribute('height', '100%');
-                bgRect.setAttribute('fill', 'white');
-                cleanSvg.insertBefore(bgRect, cleanSvg.firstChild);
-            }
-
-            if (!cleanSvg.hasAttribute('viewBox') && cleanSvg.hasAttribute('width') && cleanSvg.hasAttribute('height')) {
-                const width = cleanSvg.getAttribute('width');
-                const height = cleanSvg.getAttribute('height');
-                cleanSvg.setAttribute('viewBox', `0 0 ${width} ${height}`);
-            }
-
-            const serializer = new XMLSerializer();
-            let finalSvgString = serializer.serializeToString(cleanSvg);
-            finalSvgString = optimizeSvgString(finalSvgString);
-
-            downloadSvgFile(finalSvgString, 'silhouette.svg');
+            downloadSvgFile(svg, 'trace.svg');
         } catch (error) {
             console.error(`Error completing SVG download: ${error.message}`);
             updateStatus(`Download error: ${error.message}`, false);
         }
+    }
+
+    function optimizePath(d) {
+        if (!d) return d;
+        return d
+            .replace(/(\d+)\.(\d)\d+/g, '$1.$2')
+            .replace(/(\d+)\.0(?=\s|,|[A-Za-z]|$)/g, '$1')
+            .replace(/\s{2,}/g, ' ')
+            .replace(/([MCLHVSQTAZmclhvsqtaz])\s+/g, '$1')
+            .replace(/\s+([MCLHVSQTAZmclhvsqtaz])/g, '$1')
+            .replace(/,\s+/g, ',')
+            .replace(/\s+,/g, ',')
+            .trim();
     }
 
     function downloadSvgFile(svgString, filename) {
@@ -544,7 +538,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 svgData = svgData.replace('<svg', `<svg viewBox="0 0 ${svgWidth} ${svgHeight}"`);
                             }
                         }
-                        resolve(svgData);
+                        resolve(optimizeSvgString(svgData));
                     } catch (error) {
                         console.error("Error generating SVG with Potrace:", error);
                         reject(error);
@@ -579,8 +573,10 @@ document.addEventListener('DOMContentLoaded', () => {
             .replace(/<title[^>]*>[\s\S]*?<\/title>/gi, '')
             .replace(/<desc[^>]*>[\s\S]*?<\/desc>/gi, '')
             .replace(/<metadata[^>]*>[\s\S]*?<\/metadata>/gi, '')
+            .replace(/\s+id="[^"]*"/g, '')
+            .replace(/\s+version="[^"]*"/g, '')
             .replace(/\s{2,}/g, ' ')
-            .replace(/(\d+\.\d{3,})/g, (match) => parseFloat(match).toFixed(2));
+            .replace(/(\d+)\.(\d)\d+/g, '$1.$2');
     }
 });
 
