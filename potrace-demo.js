@@ -894,62 +894,57 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.putImageData(adjustedData, 0, 0);
             
             try {
-                // --- Determine simplification level based on mobile and interactive state ---
-                let simplifyLevel = 0; // 0: Detailed, 1: Interactive Desktop, 2: Interactive Mobile
+                let simplifyLevel = 0;
                 if (isInteractive) {
                     simplifyLevel = mobileInfo.isMobile ? 2 : 1;
                 }
                 
-                // Process line art with appropriate simplification level
+                // Line art still uses the standalone pipeline
                 const lineArtPromise = processLineArtWithPotrace(
                     canvas, threshold, invertColors, blurRadius, lineThickness, smoothing, edgeSensitivity, simplifyLevel
                 ).catch(error => {
-                        console.error('Error in line art processing:', error);
-                        return createErrorSvg(`Error generating line art: ${error.message}`, canvas.width, canvas.height);
-                    });
-                
-                // Process silhouette with appropriate simplification level
-                const silhouettePromise = processSilhouette(
-                    canvas, threshold, invertColors, blurRadius, smoothing, edgeSensitivity, simplifyLevel
-                ).catch(error => {
-                        console.error('Error in silhouette processing:', error);
-                        return createErrorSvg(`Error generating silhouette: ${error.message}`, canvas.width, canvas.height);
+                    console.error('Error in line art processing:', error);
+                    return createErrorSvg(`Error generating line art: ${error.message}`, canvas.width, canvas.height);
                 });
                 
-                // Wait for both to finish
+                // Silhouette uses the NYCES preprocessCanvas pipeline (exact match)
+                // Feeds raw originalImageData (not the pre-adjusted canvas) so NYCES
+                // preprocessing handles brightness/contrast with its own formula
+                const silhouetteCanvas = document.createElement('canvas');
+                silhouetteCanvas.width = originalImage.naturalWidth;
+                silhouetteCanvas.height = originalImage.naturalHeight;
+                const silCtx = silhouetteCanvas.getContext('2d', { willReadFrequently: true });
+                silCtx.drawImage(originalImage, 0, 0);
+
+                const silhouettePromise = processSilhouette(
+                    silhouetteCanvas, threshold, invertColors, brightness, contrast, simplifyLevel
+                ).catch(error => {
+                    console.error('Error in silhouette processing:', error);
+                    return createErrorSvg(`Error generating silhouette: ${error.message}`, canvas.width, canvas.height);
+                });
+                
                 Promise.all([lineArtPromise, silhouettePromise]).then(([lineArtSvg, silhouetteSvg]) => {
-                    // --- Check for recent interaction before updating UI (same as before) ---
-                     if (Date.now() - appState.lastInteractionTime < 200) {
-                        // User has interacted recently, don't update the UI
-                        if (typeof callback === 'function') {
-                            callback(); // Still call callback to potentially trigger next step
-                        }
+                    if (Date.now() - appState.lastInteractionTime < 200) {
+                        if (typeof callback === 'function') callback();
                         return;
                     }
                     
-                    // Store results
                     currentSvgData = lineArtSvg;
                     currentSilhouetteSvgData = silhouetteSvg;
                     
-                    // Display results
                     svgPreview.innerHTML = lineArtSvg;
                     silhouettePreview.innerHTML = silhouetteSvg;
                     
-                    // Enable download buttons
                     downloadBtn.disabled = false;
                     downloadSilhouetteBtn.disabled = false;
                     
-                    // --- Log completion time (same as before) ---
                     const endTime = performance.now();
                     const processingTime = Math.round(endTime - startTime);
                     const mode = isInteractive ? "Interactive" : "Detailed";
                     safeLog(`${mode} processing complete in ${processingTime}ms`, true);
                     updateStatus(`Processed in ${processingTime}ms`, false);
                     
-                    // If a callback was provided, call it now
-                    if (typeof callback === 'function') {
-                        callback();
-                    }
+                    if (typeof callback === 'function') callback();
                 });
             } catch (error) {
                 console.error('Error processing image:', error);
@@ -1052,83 +1047,104 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     
-    // Process silhouette using Potrace - updated with simplifyLevel
-    function processSilhouette(canvas, threshold, invertColors, blurRadius = 0, smoothing = 0.5, sensitivity = 1.8, simplifyLevel = 0) {
+    /**
+     * Process silhouette using the exact NYCES preprocessCanvas pipeline.
+     * Copied from useMonochromeProcessor.preprocessCanvas:
+     *   alpha-blend to white -> multiplicative brightness -> contrast -> grayscale -> threshold -> invert
+     * Then traces with NYCES DEFAULT_POTRACE_PARAMS.
+     */
+    function processSilhouette(canvas, threshold, invertColors, brightness, contrast, simplifyLevel) {
         const potraceCanvas = document.createElement('canvas');
         const potraceCtx = potraceCanvas.getContext('2d', { willReadFrequently: true });
-        
-        // --- Scale canvas based on simplifyLevel (more aggressive for mobile) ---
+
         let scaleFactor = 1;
-        if (simplifyLevel === 2) { // Interactive Mobile
+        if (simplifyLevel === 2) {
             const maxSize = Math.max(canvas.width, canvas.height);
-             if (maxSize > 500) scaleFactor = maxSize / 500; // More aggressive downsampling
-        } else if (simplifyLevel === 1) { // Interactive Desktop
+            if (maxSize > 500) scaleFactor = maxSize / 500;
+        } else if (simplifyLevel === 1) {
             const maxSize = Math.max(canvas.width, canvas.height);
             if (maxSize > 800) scaleFactor = maxSize / 800;
         }
-        
+
         potraceCanvas.width = Math.floor(canvas.width / scaleFactor);
         potraceCanvas.height = Math.floor(canvas.height / scaleFactor);
         potraceCtx.drawImage(canvas, 0, 0, potraceCanvas.width, potraceCanvas.height);
-        
-        let imageData = potraceCtx.getImageData(0, 0, potraceCanvas.width, potraceCanvas.height);
-        
-        // --- Apply effects conditionally based on simplifyLevel ---
-        if (simplifyLevel === 0) { // Only enhance edges in detailed mode
-            const enhancedData = enhanceEdges(imageData.data, potraceCanvas.width, potraceCanvas.height, sensitivity);
-             imageData = new ImageData(enhancedData, potraceCanvas.width, potraceCanvas.height);
-        }
-        
-        if (blurRadius > 0 && simplifyLevel < 2) { // Apply blur unless in fastest mobile mode
-            const pixels = imageData.data;
-            applyBlur(pixels, potraceCanvas.width, potraceCanvas.height, blurRadius, simplifyLevel === 0);
-            potraceCtx.putImageData(imageData, 0, 0);
-            imageData = potraceCtx.getImageData(0, 0, potraceCanvas.width, potraceCanvas.height);
-        }
-        
-        const binaryData = applyThreshold(
-            imageData.data, potraceCanvas.width, potraceCanvas.height, threshold, invertColors, 
-            simplifyLevel === 0 // Adaptive threshold only in detailed mode
-        );
-        potraceCtx.putImageData(new ImageData(binaryData, potraceCanvas.width, potraceCanvas.height), 0, 0);
-        
-         // --- Adjust Potrace tolerance based on simplifyLevel ---
-        const turdsize = Math.max(2, Math.min(12, 8 - sensitivity)); // Slightly different turdsize for silhouette
-        let opttolerance;
-        if (simplifyLevel === 2) {
-            opttolerance = 0.6 + (smoothing * 0.6);  // Very relaxed
-        } else if (simplifyLevel === 1) {
-            opttolerance = 0.4 + (smoothing * 0.6);  // Relaxed
-        } else {
-            opttolerance = 0.3 + (smoothing * 0.65); // Precise
+
+        // --- Begin: NYCES preprocessCanvas (exact copy) ---
+        const imageData = potraceCtx.getImageData(0, 0, potraceCanvas.width, potraceCanvas.height);
+        const data = imageData.data;
+
+        const brightnessFactor = 1 + brightness / 100;
+        const contrastFactor = (100 + contrast) / 100;
+
+        for (let i = 0; i < data.length; i += 4) {
+            let r = data[i];
+            let g = data[i + 1];
+            let b = data[i + 2];
+            const alpha = data[i + 3];
+
+            if (alpha < 255) {
+                const alphaFactor = alpha / 255;
+                r = Math.round(r * alphaFactor + 255 * (1 - alphaFactor));
+                g = Math.round(g * alphaFactor + 255 * (1 - alphaFactor));
+                b = Math.round(b * alphaFactor + 255 * (1 - alphaFactor));
+                data[i + 3] = 255;
+            }
+
+            if (brightness !== 0) {
+                r *= brightnessFactor;
+                g *= brightnessFactor;
+                b *= brightnessFactor;
+            }
+
+            if (contrast !== 0) {
+                r = ((r / 255 - 0.5) * contrastFactor + 0.5) * 255;
+                g = ((g / 255 - 0.5) * contrastFactor + 0.5) * 255;
+                b = ((b / 255 - 0.5) * contrastFactor + 0.5) * 255;
+            }
+
+            r = Math.min(255, Math.max(0, Math.round(r)));
+            g = Math.min(255, Math.max(0, Math.round(g)));
+            b = Math.min(255, Math.max(0, Math.round(b)));
+
+            const gray = r * 0.299 + g * 0.587 + b * 0.114;
+            let value = gray < threshold ? 0 : 255;
+
+            if (invertColors) value = 255 - value;
+
+            data[i] = value;
+            data[i + 1] = value;
+            data[i + 2] = value;
         }
 
-        Potrace.setParameter({ turdsize, alphamax: 0.5, optcurve: true, opttolerance, turnpolicy: "majority" });
+        potraceCtx.putImageData(imageData, 0, 0);
+        // --- End: NYCES preprocessCanvas ---
+
+        // NYCES DEFAULT_POTRACE_PARAMS (exact values)
+        Potrace.setParameter({
+            turdsize: 1,
+            alphamax: 0.7,
+            optcurve: true,
+            opttolerance: 0.15,
+            turnpolicy: "minority"
+        });
         Potrace.loadImageFromCanvas(potraceCanvas);
-        
-        // --- Potrace promise execution (same as before) ---
+
         return new Promise((resolve, reject) => {
             try {
                 Potrace.process(() => {
                     try {
-                        const svgData = Potrace.getSVG(1); // Default mode for silhouette
-                        let fixedSvg = svgData;
-                         // ... (viewBox and styling fixes remain the same)
+                        let svgData = Potrace.getSVG(1);
                         const widthMatch = svgData.match(/width="([^"]+)"/);
                         const heightMatch = svgData.match(/height="([^"]+)"/);
                         if (widthMatch && heightMatch) {
                             const svgWidth = Number.parseFloat(widthMatch[1]);
                             const svgHeight = Number.parseFloat(heightMatch[1]);
                             if (svgData.indexOf('viewBox') === -1) {
-                                fixedSvg = svgData.replace('<svg', `<svg viewBox="0 0 ${svgWidth} ${svgHeight}"`);
+                                svgData = svgData.replace('<svg', `<svg viewBox="0 0 ${svgWidth} ${svgHeight}"`);
                             }
                         }
-                        if (invertColors) {
-                            const rectString = '<rect width="100%" height="100%" fill="white"/>';
-                            const svgTagEnd = fixedSvg.indexOf('>') + 1;
-                            fixedSvg = fixedSvg.substring(0, svgTagEnd) + rectString + fixedSvg.substring(svgTagEnd);
-                        }
-                        resolve(fixedSvg);
+                        resolve(svgData);
                     } catch (error) {
                         console.error("Error generating SVG with Potrace:", error);
                         reject(error);

@@ -170,35 +170,82 @@
     return canvas;
   }
 
-  function traceWithPotrace(canvas, params, mode) {
+  /**
+   * NYCES preprocessCanvas pipeline for silhouette (exact copy).
+   * For lineart mode, uses the standalone edge-enhance/blur/threshold pipeline.
+   */
+  function traceWithPotrace(canvas, img, params, mode) {
     const pc = document.createElement('canvas');
     const pctx = pc.getContext('2d', { willReadFrequently: true });
     pc.width = canvas.width;
     pc.height = canvas.height;
-    pctx.drawImage(canvas, 0, 0);
 
-    let imageData = pctx.getImageData(0, 0, pc.width, pc.height);
+    if (mode === 'silhouette') {
+      // --- NYCES preprocessCanvas (exact copy) ---
+      // Start from the raw image, not the pre-adjusted canvas
+      pctx.drawImage(img, 0, 0, pc.width, pc.height);
+      const imageData = pctx.getImageData(0, 0, pc.width, pc.height);
+      const data = imageData.data;
 
-    if (mode === 'lineart') {
+      const brightnessFactor = 1 + params.brightness / 100;
+      const contrastFactor = (100 + params.contrast) / 100;
+
+      for (let i = 0; i < data.length; i += 4) {
+        let r = data[i], g = data[i + 1], b = data[i + 2];
+        const alpha = data[i + 3];
+
+        if (alpha < 255) {
+          const af = alpha / 255;
+          r = Math.round(r * af + 255 * (1 - af));
+          g = Math.round(g * af + 255 * (1 - af));
+          b = Math.round(b * af + 255 * (1 - af));
+          data[i + 3] = 255;
+        }
+
+        if (params.brightness !== 0) { r *= brightnessFactor; g *= brightnessFactor; b *= brightnessFactor; }
+        if (params.contrast !== 0) {
+          r = ((r / 255 - 0.5) * contrastFactor + 0.5) * 255;
+          g = ((g / 255 - 0.5) * contrastFactor + 0.5) * 255;
+          b = ((b / 255 - 0.5) * contrastFactor + 0.5) * 255;
+        }
+
+        r = Math.min(255, Math.max(0, Math.round(r)));
+        g = Math.min(255, Math.max(0, Math.round(g)));
+        b = Math.min(255, Math.max(0, Math.round(b)));
+
+        const gray = r * 0.299 + g * 0.587 + b * 0.114;
+        let value = gray < params.threshold ? 0 : 255;
+        if (params.invertColors) value = 255 - value;
+
+        data[i] = value; data[i + 1] = value; data[i + 2] = value;
+      }
+      pctx.putImageData(imageData, 0, 0);
+
+      // NYCES DEFAULT_POTRACE_PARAMS
+      Potrace.setParameter({ turdsize: 1, alphamax: 0.7, optcurve: true, opttolerance: 0.15, turnpolicy: 'minority' });
+    } else {
+      // Line art: standalone pipeline (edge enhance, blur, threshold)
+      pctx.drawImage(canvas, 0, 0);
+      let imageData = pctx.getImageData(0, 0, pc.width, pc.height);
+
       const enhanced = enhanceEdges(imageData.data, pc.width, pc.height, params.edgeSensitivity);
       imageData = new ImageData(enhanced, pc.width, pc.height);
+
+      if (params.blurRadius > 0) {
+        applyBlur(imageData.data, pc.width, pc.height, params.blurRadius);
+        pctx.putImageData(imageData, 0, 0);
+        imageData = pctx.getImageData(0, 0, pc.width, pc.height);
+      }
+
+      const binary = applyThreshold(imageData.data, pc.width, pc.height, params.threshold, params.invertColors);
+      pctx.putImageData(new ImageData(binary, pc.width, pc.height), 0, 0);
+
+      const smoothing = params.smoothing / 100;
+      const turdsize = Math.max(2, Math.min(10, 8 - params.edgeSensitivity));
+      const opttolerance = 0.3 + (smoothing * 0.65);
+      Potrace.setParameter({ turdsize, alphamax: 0.5, optcurve: true, opttolerance, turnpolicy: 'majority' });
     }
 
-    if (params.blurRadius > 0) {
-      applyBlur(imageData.data, pc.width, pc.height, params.blurRadius);
-      pctx.putImageData(imageData, 0, 0);
-      imageData = pctx.getImageData(0, 0, pc.width, pc.height);
-    }
-
-    const binary = applyThreshold(imageData.data, pc.width, pc.height, params.threshold, params.invertColors);
-    pctx.putImageData(new ImageData(binary, pc.width, pc.height), 0, 0);
-
-    const smoothing = params.smoothing / 100;
-    const turdsize = Math.max(2, Math.min(10, 8 - params.edgeSensitivity));
-    const opttolerance = 0.3 + (smoothing * 0.65);
-    const alphamax = mode === 'silhouette' ? 1.0 : 0.5;
-
-    Potrace.setParameter({ turdsize, alphamax, optcurve: true, opttolerance, turnpolicy: 'majority' });
     Potrace.loadImageFromCanvas(pc);
 
     return new Promise((resolve, reject) => {
@@ -376,7 +423,7 @@
           for (const m of modes) {
             if (batchAborted) break;
             setProgress(processed, total, `${file.name} (${m})`);
-            results[m] = await traceWithPotrace(canvas, params, m);
+            results[m] = await traceWithPotrace(canvas, img, params, m);
             processed++;
             setProgress(processed, total, file.name);
           }
