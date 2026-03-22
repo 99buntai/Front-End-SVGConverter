@@ -287,6 +287,133 @@
             margin-right: 6px;
         }
         
+        /* Batch processing styles */
+        .batch-section {
+            background-color: #f9f9f9;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 15px 0;
+        }
+        .batch-section h2 {
+            font-size: 18px;
+            color: #4e77cc;
+            margin: 0 0 12px 0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .batch-toggle {
+            font-size: 12px;
+            background: #e8f0fe;
+            border: 1px solid #cddfed;
+            border-radius: 4px;
+            padding: 2px 8px;
+            cursor: pointer;
+            color: #4e77cc;
+        }
+        .batch-content { display: none; }
+        .batch-content.open { display: block; }
+        .batch-drop-zone {
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            padding: 16px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: white;
+            margin-bottom: 10px;
+        }
+        .batch-drop-zone:hover, .batch-drop-zone.drag-active {
+            border-color: #4e77cc;
+            background: #f0f5ff;
+        }
+        .batch-drop-zone p {
+            margin: 0;
+            font-size: 14px;
+            color: #888;
+        }
+        .batch-controls {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-bottom: 10px;
+        }
+        .batch-controls select {
+            padding: 6px 10px;
+            border-radius: 6px;
+            border: 1px solid #ddd;
+            font-size: 13px;
+            background: white;
+        }
+        .batch-controls button {
+            padding: 6px 14px;
+            font-size: 13px;
+            border-radius: 6px;
+            min-width: 0;
+            width: auto;
+        }
+        .batch-file-list {
+            max-height: 200px;
+            overflow-y: auto;
+            margin-bottom: 10px;
+        }
+        .batch-file-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 5px 8px;
+            background: white;
+            border: 1px solid #eee;
+            border-radius: 4px;
+            margin-bottom: 3px;
+            font-size: 13px;
+        }
+        .batch-file-name {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .batch-file-size { color: #999; font-size: 11px; min-width: 50px; text-align: right; }
+        .batch-file-status { min-width: 18px; text-align: center; }
+        .batch-done { color: #22a558; font-weight: bold; }
+        .batch-err { color: #e44; font-weight: bold; }
+        .batch-file-remove {
+            background: none;
+            border: none;
+            color: #bbb;
+            font-size: 16px;
+            cursor: pointer;
+            padding: 0 4px;
+            min-width: 0;
+            width: auto;
+            line-height: 1;
+        }
+        .batch-file-remove:hover { color: #e44; background: none; }
+        .batch-empty { text-align: center; color: #bbb; padding: 10px; font-size: 13px; }
+        .batch-progress {
+            background: #eee;
+            border-radius: 4px;
+            height: 6px;
+            overflow: hidden;
+            margin-bottom: 4px;
+        }
+        .batch-progress-bar {
+            height: 100%;
+            background: #4e77cc;
+            width: 0%;
+            transition: width 0.3s;
+            border-radius: 4px;
+        }
+        .batch-progress-text {
+            font-size: 11px;
+            color: #888;
+            text-align: center;
+            min-height: 16px;
+        }
+
         @media (min-width: 600px) {
             .preview-container {
                 grid-template-columns: repeat(3, 1fr);
@@ -524,32 +651,72 @@
         </div>
     </div>
 
+    <!-- Batch Processing Section -->
+    <div class="batch-section" id="batchSection">
+        <h2>
+            Batch Processing
+            <button class="batch-toggle" id="batchToggle">Show</button>
+        </h2>
+        <div class="batch-content" id="batchContent">
+            <div class="batch-drop-zone" id="batchDropZone">
+                <p>Drop multiple images here or click to select</p>
+                <input type="file" id="batchFileInput" accept="image/*" multiple style="display:none">
+            </div>
+
+            <div class="batch-controls">
+                <select id="batchModeSelect">
+                    <option value="both">Line Art + Silhouette</option>
+                    <option value="lineart">Line Art only</option>
+                    <option value="silhouette">Silhouette only</option>
+                </select>
+                <button id="batchStartBtn" disabled>Start Batch</button>
+                <button id="batchDownloadBtn" disabled>Download ZIP</button>
+                <button id="batchClearBtn">Clear</button>
+            </div>
+
+            <div id="batchFileList" class="batch-file-list"></div>
+
+            <div class="batch-progress">
+                <div class="batch-progress-bar" id="batchProgressBar"></div>
+            </div>
+            <div class="batch-progress-text" id="batchProgressText"></div>
+
+            <div class="info-text" style="margin-top:8px">
+                Uses current Vector &amp; Image parameters for all files. Outputs download as a ZIP.
+            </div>
+        </div>
+    </div>
+
     <!-- Load the required libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3/dist/jszip.min.js"></script>
     <script src="debug-message.js"></script>
     <script src="mobile-optimizations.js"></script> 
     <script src="potrace.js" defer></script>
     <script src="potrace-demo.js" defer></script>
+    <script src="batch-processor.js" defer></script>
     
-    <!-- Tab switching functionality -->
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            const tabButtons = document.querySelectorAll('.tab-button');
-            const tabContents = document.querySelectorAll('.tab-content');
-            
-            tabButtons.forEach(button => {
+            var tabButtons = document.querySelectorAll('.tab-button');
+            var tabContents = document.querySelectorAll('.tab-content');
+            tabButtons.forEach(function(button) {
                 button.addEventListener('click', function() {
-                    // Remove active class from all buttons and contents
-                    tabButtons.forEach(btn => btn.classList.remove('active'));
-                    tabContents.forEach(content => content.classList.remove('active'));
-                    
-                    // Add active class to clicked button
+                    tabButtons.forEach(function(btn) { btn.classList.remove('active'); });
+                    tabContents.forEach(function(content) { content.classList.remove('active'); });
                     this.classList.add('active');
-                    
-                    // Show corresponding content
-                    const tabId = this.getAttribute('data-tab');
-                    document.getElementById(`${tabId}-tab`).classList.add('active');
+                    var tabId = this.getAttribute('data-tab');
+                    document.getElementById(tabId + '-tab').classList.add('active');
                 });
             });
+
+            var batchToggle = document.getElementById('batchToggle');
+            var batchContent = document.getElementById('batchContent');
+            if (batchToggle && batchContent) {
+                batchToggle.addEventListener('click', function() {
+                    var isOpen = batchContent.classList.toggle('open');
+                    batchToggle.textContent = isOpen ? 'Hide' : 'Show';
+                });
+            }
         });
     </script>
 </body>
