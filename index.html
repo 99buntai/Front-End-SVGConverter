@@ -297,45 +297,71 @@
             min-width: 0;
             width: auto;
         }
-        .batch-file-list {
-            max-height: 200px;
-            overflow-y: auto;
+        .batch-preview-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 8px;
             margin-bottom: 10px;
+            max-height: 400px;
+            overflow-y: auto;
+            padding: 2px;
         }
-        .batch-file-row {
+        .batch-card {
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            background: white;
+            overflow: hidden;
+            position: relative;
+            transition: box-shadow 0.2s;
+        }
+        .batch-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .batch-card-preview {
+            height: 100px;
             display: flex;
             align-items: center;
-            gap: 8px;
-            padding: 5px 8px;
-            background: white;
-            border: 1px solid #eee;
-            border-radius: 4px;
-            margin-bottom: 3px;
-            font-size: 13px;
+            justify-content: center;
+            background: #fafafa;
+            overflow: hidden;
         }
-        .batch-file-name {
-            flex: 1;
+        .batch-thumb-svg { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; padding: 4px; }
+        .batch-thumb-svg svg { max-width: 100%; max-height: 100%; }
+        .batch-thumb-img { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+        .batch-thumb-img img { max-width: 100%; max-height: 100%; object-fit: contain; opacity: 0.4; }
+        .batch-thumb-loading { font-size: 11px; color: #aaa; }
+        .batch-card-name {
+            padding: 4px 6px;
+            font-size: 10px;
+            color: #666;
+            text-align: center;
+            white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
-            white-space: nowrap;
+            border-top: 1px solid #f0f0f0;
         }
-        .batch-file-size { color: #999; font-size: 11px; min-width: 50px; text-align: right; }
-        .batch-file-status { min-width: 18px; text-align: center; }
-        .batch-done { color: #22a558; font-weight: bold; }
-        .batch-err { color: #e44; font-weight: bold; }
-        .batch-file-remove {
-            background: none;
+        .batch-card-remove {
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            background: rgba(0,0,0,0.4);
             border: none;
-            color: #bbb;
-            font-size: 16px;
+            color: white;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            font-size: 12px;
             cursor: pointer;
-            padding: 0 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
             min-width: 0;
-            width: auto;
             line-height: 1;
+            opacity: 0;
+            transition: opacity 0.15s;
         }
-        .batch-file-remove:hover { color: #e44; background: none; }
-        .batch-empty { text-align: center; color: #bbb; padding: 10px; font-size: 13px; }
+        .batch-card:hover .batch-card-remove { opacity: 1; }
+        .batch-card-remove:hover { background: rgba(220,50,50,0.8); }
+        .batch-empty { text-align: center; color: #bbb; padding: 16px; font-size: 13px; }
         .batch-progress {
             background: #eee;
             border-radius: 4px;
@@ -429,7 +455,7 @@
                     <div class="slider-control">
                         <div class="slider-label">
                             <span>Threshold</span>
-                            <span id="thresholdValue">128</span>
+                            <span id="thresholdValue">148</span>
                         </div>
                         <input type="range" id="thresholdSlider" min="0" max="255" value="128">
                         <div class="info-text">Controls black/white cutoff level</div>
@@ -489,21 +515,21 @@
                 <input type="file" id="batchFileInput" accept="image/*" multiple style="display:none">
             </div>
 
-            <div class="batch-controls">
-                <button id="batchStartBtn" disabled>Start Batch</button>
-                <button id="batchDownloadBtn" disabled>Download ZIP</button>
-                <button id="batchClearBtn">Clear</button>
-            </div>
-
-            <div id="batchFileList" class="batch-file-list"></div>
+            <div id="batchPreviewGrid" class="batch-preview-grid"></div>
 
             <div class="batch-progress">
                 <div class="batch-progress-bar" id="batchProgressBar"></div>
             </div>
             <div class="batch-progress-text" id="batchProgressText"></div>
 
-            <div class="info-text" style="margin-top:8px">
-                Uses current parameters for all files. Outputs download as a ZIP.
+            <div class="batch-controls">
+                <button id="batchStartBtn" disabled>Retrace All</button>
+                <button id="batchDownloadBtn" disabled>Download ZIP</button>
+                <button id="batchClearBtn">Clear All</button>
+            </div>
+
+            <div class="info-text" style="margin-top:4px">
+                Adjusting sliders above auto-retraces all images. Download as ZIP when ready.
             </div>
         </div>
     </div>

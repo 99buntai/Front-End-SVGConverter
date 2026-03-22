@@ -28,7 +28,7 @@
     });
   }
 
-  function traceWithPotrace(img, params) {
+  function traceImage(img, params) {
     const pc = document.createElement('canvas');
     const pctx = pc.getContext('2d', { willReadFrequently: true });
     pc.width = img.naturalWidth;
@@ -42,25 +42,18 @@
     const contrastFactor = (100 + params.contrast) / 100;
 
     for (let i = 0; i < data.length; i += 4) {
-      let r = data[i];
-      let g = data[i + 1];
-      let b = data[i + 2];
+      let r = data[i], g = data[i + 1], b = data[i + 2];
       const alpha = data[i + 3];
 
       if (alpha < 255) {
-        const alphaFactor = alpha / 255;
-        r = Math.round(r * alphaFactor + 255 * (1 - alphaFactor));
-        g = Math.round(g * alphaFactor + 255 * (1 - alphaFactor));
-        b = Math.round(b * alphaFactor + 255 * (1 - alphaFactor));
+        const af = alpha / 255;
+        r = Math.round(r * af + 255 * (1 - af));
+        g = Math.round(g * af + 255 * (1 - af));
+        b = Math.round(b * af + 255 * (1 - af));
         data[i + 3] = 255;
       }
 
-      if (params.brightness !== 0) {
-        r *= brightnessFactor;
-        g *= brightnessFactor;
-        b *= brightnessFactor;
-      }
-
+      if (params.brightness !== 0) { r *= brightnessFactor; g *= brightnessFactor; b *= brightnessFactor; }
       if (params.contrast !== 0) {
         r = ((r / 255 - 0.5) * contrastFactor + 0.5) * 255;
         g = ((g / 255 - 0.5) * contrastFactor + 0.5) * 255;
@@ -73,23 +66,14 @@
 
       const gray = r * 0.299 + g * 0.587 + b * 0.114;
       let value = gray < params.threshold ? 0 : 255;
-
       if (params.invertColors) value = 255 - value;
 
-      data[i] = value;
-      data[i + 1] = value;
-      data[i + 2] = value;
+      data[i] = value; data[i + 1] = value; data[i + 2] = value;
     }
 
     pctx.putImageData(imageData, 0, 0);
 
-    Potrace.setParameter({
-      turdsize: 1,
-      alphamax: 0.7,
-      optcurve: true,
-      opttolerance: 0.15,
-      turnpolicy: 'minority'
-    });
+    Potrace.setParameter({ turdsize: 1, alphamax: 0.7, optcurve: true, opttolerance: 0.15, turnpolicy: 'minority' });
     Potrace.loadImageFromCanvas(pc);
 
     return new Promise((resolve, reject) => {
@@ -102,7 +86,6 @@
             const srcSvg = doc.querySelector('svg');
             const w = srcSvg ? srcSvg.getAttribute('width') : pc.width;
             const h = srcSvg ? srcSvg.getAttribute('height') : pc.height;
-
             const pathEl = doc.querySelector('path');
             const pathD = pathEl ? optimizePath(pathEl.getAttribute('d') || '') : '';
 
@@ -125,9 +108,12 @@
     };
   }
 
-  let batchFiles = [];
-  let batchResults = [];
+  // Each entry: { file, name, img (loaded Image), svg (result string) }
+  let batchItems = [];
   let batchAborted = false;
+  let isProcessing = false;
+  let retraceQueued = false;
+  let retraceTimer = null;
 
   function initBatchUI() {
     const section = document.getElementById('batchSection');
@@ -135,7 +121,7 @@
 
     const dropZone = document.getElementById('batchDropZone');
     const fileInput = document.getElementById('batchFileInput');
-    const fileList = document.getElementById('batchFileList');
+    const previewGrid = document.getElementById('batchPreviewGrid');
     const startBtn = document.getElementById('batchStartBtn');
     const downloadBtn = document.getElementById('batchDownloadBtn');
     const clearBtn = document.getElementById('batchClearBtn');
@@ -143,11 +129,7 @@
     const progressText = document.getElementById('batchProgressText');
 
     dropZone.addEventListener('click', () => fileInput.click());
-
-    dropZone.addEventListener('dragover', e => {
-      e.preventDefault();
-      dropZone.classList.add('drag-active');
-    });
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-active'); });
     dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-active'));
     dropZone.addEventListener('drop', e => {
       e.preventDefault();
@@ -164,41 +146,82 @@
     downloadBtn.addEventListener('click', downloadZip);
     clearBtn.addEventListener('click', clearBatch);
 
-    function addFiles(files) {
-      const images = files.filter(f => f.type.match('image.*'));
-      if (!images.length) return;
-      batchFiles.push(...images);
-      renderFileList();
-      startBtn.disabled = false;
-      downloadBtn.disabled = true;
+    // Auto-retrace when sliders/toggles change
+    const sliders = document.querySelectorAll('#thresholdSlider, #brightnessSlider, #contrastSlider');
+    const toggles = document.querySelectorAll('#invertColorsToggle');
+
+    sliders.forEach(s => s.addEventListener('input', scheduleRetrace));
+    toggles.forEach(t => t.addEventListener('change', scheduleRetrace));
+
+    function scheduleRetrace() {
+      if (!batchItems.length || !batchItems.some(it => it.img)) return;
+      if (retraceTimer) clearTimeout(retraceTimer);
+      retraceTimer = setTimeout(() => {
+        if (isProcessing) {
+          retraceQueued = true;
+        } else {
+          runBatch();
+        }
+      }, 300);
     }
 
-    function renderFileList() {
-      if (!batchFiles.length) {
-        fileList.innerHTML = '<div class="batch-empty">No files added</div>';
+    async function addFiles(files) {
+      const images = files.filter(f => f.type.match('image.*'));
+      if (!images.length) return;
+
+      for (const file of images) {
+        const name = file.name.replace(/\.[^/.]+$/, '');
+        const item = { file, name, img: null, svg: null };
+        batchItems.push(item);
+      }
+
+      renderGrid();
+      startBtn.disabled = false;
+      downloadBtn.disabled = true;
+
+      // Preload images
+      for (const item of batchItems) {
+        if (!item.img) {
+          try {
+            item.img = await loadImageFromFile(item.file);
+            renderGrid();
+          } catch (e) {
+            console.error('Failed to load:', item.file.name, e);
+          }
+        }
+      }
+
+      // Auto-trace after loading
+      runBatch();
+    }
+
+    function renderGrid() {
+      if (!batchItems.length) {
+        previewGrid.innerHTML = '<div class="batch-empty">No files added</div>';
         return;
       }
-      fileList.innerHTML = batchFiles.map((f, i) => {
-        const status = batchResults[i]
-          ? '<span class="batch-done">&#10003;</span>'
-          : (batchResults[i] === null ? '<span class="batch-err">&#10007;</span>' : '');
-        const size = (f.size / 1024).toFixed(0) + ' KB';
-        return `<div class="batch-file-row">
-          <span class="batch-file-name">${f.name}</span>
-          <span class="batch-file-size">${size}</span>
-          <span class="batch-file-status">${status}</span>
-          <button class="batch-file-remove" data-idx="${i}" title="Remove">&times;</button>
+      previewGrid.innerHTML = batchItems.map((item, i) => {
+        let preview = '';
+        if (item.svg) {
+          preview = `<div class="batch-thumb-svg">${item.svg}</div>`;
+        } else if (item.img) {
+          preview = `<div class="batch-thumb-img"><img src="${item.img.src}" alt="${item.name}"></div>`;
+        } else {
+          preview = '<div class="batch-thumb-loading">Loading...</div>';
+        }
+        return `<div class="batch-card" data-idx="${i}">
+          <div class="batch-card-preview">${preview}</div>
+          <div class="batch-card-name" title="${item.file.name}">${item.name}</div>
+          <button class="batch-card-remove" data-idx="${i}">&times;</button>
         </div>`;
       }).join('');
 
-      fileList.querySelectorAll('.batch-file-remove').forEach(btn => {
+      previewGrid.querySelectorAll('.batch-card-remove').forEach(btn => {
         btn.addEventListener('click', e => {
           e.stopPropagation();
-          const idx = parseInt(btn.dataset.idx, 10);
-          batchFiles.splice(idx, 1);
-          batchResults.splice(idx, 1);
-          renderFileList();
-          if (!batchFiles.length) {
+          batchItems.splice(parseInt(btn.dataset.idx, 10), 1);
+          renderGrid();
+          if (!batchItems.length) {
             startBtn.disabled = true;
             downloadBtn.disabled = true;
           }
@@ -206,67 +229,73 @@
       });
     }
 
-    function setProgress(current, total, fileName) {
+    function setProgress(current, total, text) {
       const pct = total ? Math.round((current / total) * 100) : 0;
       progressBar.style.width = pct + '%';
-      progressText.textContent = total ? `${current}/${total} — ${fileName}` : '';
+      progressText.textContent = total ? `${current}/${total} — ${text}` : '';
     }
 
     async function runBatch() {
-      if (!batchFiles.length) return;
+      if (!batchItems.length) return;
       batchAborted = false;
-      batchResults = new Array(batchFiles.length);
+      isProcessing = true;
+      retraceQueued = false;
       startBtn.disabled = true;
       startBtn.textContent = 'Processing...';
       downloadBtn.disabled = true;
       clearBtn.disabled = true;
 
       const params = readCurrentParams();
-      const total = batchFiles.length;
-      let processed = 0;
+      const total = batchItems.length;
 
-      for (let i = 0; i < batchFiles.length; i++) {
+      for (let i = 0; i < batchItems.length; i++) {
         if (batchAborted) break;
-        const file = batchFiles[i];
-        const baseName = file.name.replace(/\.[^/.]+$/, '');
-        setProgress(processed, total, file.name);
+        const item = batchItems[i];
+        setProgress(i, total, item.file.name);
+
+        if (!item.img) {
+          try { item.img = await loadImageFromFile(item.file); } catch (e) {
+            console.error('Load error:', item.file.name, e);
+            item.svg = null;
+            continue;
+          }
+        }
 
         try {
-          const img = await loadImageFromFile(file);
-          const svg = await traceWithPotrace(img, params);
-          processed++;
-          setProgress(processed, total, file.name);
-          batchResults[i] = { baseName, svg };
+          item.svg = await traceImage(item.img, params);
         } catch (err) {
-          console.error(`Batch error on ${file.name}:`, err);
-          batchResults[i] = null;
-          processed++;
+          console.error('Trace error:', item.file.name, err);
+          item.svg = null;
         }
-        renderFileList();
+
+        renderGrid();
       }
 
       setProgress(total, total, 'Complete');
+      isProcessing = false;
       startBtn.disabled = false;
-      startBtn.textContent = 'Start Batch';
+      startBtn.textContent = 'Retrace All';
       clearBtn.disabled = false;
+      downloadBtn.disabled = !batchItems.some(it => it.svg);
 
-      const hasResults = batchResults.some(r => r);
-      downloadBtn.disabled = !hasResults;
+      if (retraceQueued) {
+        retraceQueued = false;
+        runBatch();
+      }
     }
 
     async function downloadZip() {
-      const validResults = batchResults.filter(r => r);
-      if (!validResults.length) return;
+      const valid = batchItems.filter(it => it.svg);
+      if (!valid.length) return;
 
       downloadBtn.disabled = true;
       downloadBtn.textContent = 'Zipping...';
 
       try {
         const zip = new JSZip();
-        for (const result of validResults) {
-          zip.file(`${result.baseName}.svg`, result.svg);
+        for (const item of valid) {
+          zip.file(`${item.name}.svg`, item.svg);
         }
-
         const blob = await zip.generateAsync({ type: 'blob' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -274,12 +303,9 @@
         a.download = `svg-batch-${Date.now()}.zip`;
         document.body.appendChild(a);
         a.click();
-        setTimeout(() => {
-          document.body.removeChild(a);
-          URL.revokeObjectURL(url);
-        }, 100);
+        setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
       } catch (err) {
-        console.error('ZIP creation failed:', err);
+        console.error('ZIP failed:', err);
         alert('Failed to create ZIP: ' + err.message);
       }
 
@@ -289,16 +315,15 @@
 
     function clearBatch() {
       batchAborted = true;
-      batchFiles = [];
-      batchResults = [];
-      renderFileList();
+      batchItems = [];
+      renderGrid();
       setProgress(0, 0, '');
       startBtn.disabled = true;
       startBtn.textContent = 'Start Batch';
       downloadBtn.disabled = true;
     }
 
-    renderFileList();
+    renderGrid();
   }
 
   document.addEventListener('DOMContentLoaded', initBatchUI);
