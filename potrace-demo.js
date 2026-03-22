@@ -360,67 +360,57 @@ document.addEventListener('DOMContentLoaded', () => {
     
     /**
      * Apply image adjustments to pixel data
+     * Enhanced with alpha-blending from useMonochromeProcessor pipeline
      */
     function applyImageAdjustments(data, brightness, contrast, brilliance, shadows) {
-        // Convert contrast value to multiplier (0-100 -> 0-2)
         const contrastFactor = (100 + contrast) / 100;
-        
-        // Convert brilliance and shadows to factors
         const brillianceFactor = brilliance / 100;
         const shadowsFactor = shadows / 100;
-        
-        // Process each pixel
+
         for (let i = 0; i < data.length; i += 4) {
-            // Get original RGB values
             let r = data[i];
             let g = data[i + 1];
             let b = data[i + 2];
-            
-            // Calculate luminance (0-1)
+            const alpha = data[i + 3];
+
+            // Alpha blend to white background for consistent tracing
+            if (alpha < 255) {
+                const alphaFactor = alpha / 255;
+                r = Math.round(r * alphaFactor + 255 * (1 - alphaFactor));
+                g = Math.round(g * alphaFactor + 255 * (1 - alphaFactor));
+                b = Math.round(b * alphaFactor + 255 * (1 - alphaFactor));
+                data[i + 3] = 255;
+            }
+
             const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-            
-            // Apply shadows adjustment (affects dark areas more)
+
             if (shadows !== 0) {
-                // Create a shadows strength factor that decreases as luminance increases
-                // Stronger in shadow areas, minimal in highlights
                 const shadowsStrength = Math.max(0, 1 - luminance * 2.5);
-                
-                // Apply shadows adjustment with varying strength based on luminance
-                const shadowsAdjustment = shadowsFactor * shadowsStrength * 50; // Scale factor to make adjustment visible
+                const shadowsAdjustment = shadowsFactor * shadowsStrength * 50;
                 r += shadowsAdjustment;
                 g += shadowsAdjustment;
                 b += shadowsAdjustment;
             }
-            
-            // Apply brilliance adjustment (affects mid-tones more)
+
             if (brilliance !== 0) {
-                // Create a brilliance strength that peaks in mid-tones and decreases at extremes
-                // bellcurve effect - strongest around 0.5 luminance, weaker at 0 and 1
                 const brillianceStrength = 1 - Math.abs(luminance - 0.5) * 2;
-                
-                // Apply brilliance with varying strength based on luminance
                 const brillianceAdjustment = brillianceFactor * brillianceStrength * 50;
                 r += brillianceAdjustment;
                 g += brillianceAdjustment;
                 b += brillianceAdjustment;
             }
-            
-            // Apply brightness (add value to each channel)
-            r += brightness * 2.55; // Convert -100 to 100 scale to -255 to 255
+
+            r += brightness * 2.55;
             g += brightness * 2.55;
             b += brightness * 2.55;
-            
-            // Apply contrast
-            // First, normalize to -0.5 to 0.5 range, apply contrast, then back to 0-255
+
             r = ((r / 255 - 0.5) * contrastFactor + 0.5) * 255;
             g = ((g / 255 - 0.5) * contrastFactor + 0.5) * 255;
             b = ((b / 255 - 0.5) * contrastFactor + 0.5) * 255;
-            
-            // Clamp values to valid range
+
             data[i] = Math.min(255, Math.max(0, Math.round(r)));
             data[i + 1] = Math.min(255, Math.max(0, Math.round(g)));
             data[i + 2] = Math.min(255, Math.max(0, Math.round(b)));
-            // Don't modify alpha
         }
     }
     
@@ -1394,28 +1384,19 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function optimizeSvgString(svgString) {
-        // 1. Remove XML declaration if present (not needed for modern browsers)
         let optimized = svgString.replace(/<\?xml[^>]*>\s*/g, '');
-        
-        // 2. Remove comments
         optimized = optimized.replace(/<!--[\s\S]*?-->/g, '');
-        
-        // 3. Remove unnecessary attributes
         optimized = optimized.replace(/\s+version="[^"]*"/g, '');
-        
-        // 4. Set minimal precision for all numbers in attributes
-        optimized = optimized.replace(/(\d+\.\d{1,6})(?=\s|"|'|,)/g, match => {
-            const num = Number.parseFloat(match);
-            return num.toFixed(1); // Reduce to 1 decimal place
+        optimized = optimized.replace(/<title[^>]*>[\s\S]*?<\/title>/gi, '');
+        optimized = optimized.replace(/<desc[^>]*>[\s\S]*?<\/desc>/gi, '');
+        optimized = optimized.replace(/<metadata[^>]*>[\s\S]*?<\/metadata>/gi, '');
+        optimized = optimized.replace(/(\d+\.\d{3,})/g, match => {
+            return Number.parseFloat(match).toFixed(2);
         });
-        
-        // 5. Remove redundant zeros after decimal point in attributes
         optimized = optimized.replace(/(\d+)\.0(?=\s|"|'|,)/g, '$1');
-        
-        // 6. Remove unnecessary spaces
         optimized = optimized.replace(/\s{2,}/g, ' ');
         optimized = optimized.replace(/>\s+</g, '><');
-        
+        optimized = optimized.replace(/<g>\s*<\/g>/g, '');
         return optimized;
     }
 });
