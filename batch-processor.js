@@ -18,13 +18,52 @@
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = e => {
-        const img = new Image();
-        img.onload = () => resolve(img);
-        img.onerror = () => reject(new Error('Failed to load image: ' + file.name));
-        img.src = e.target.result;
+        if (file.type === 'image/svg+xml' || file.name.toLowerCase().endsWith('.svg')) {
+          const svgText = e.target.result;
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(svgText, 'image/svg+xml');
+          const svgEl = doc.querySelector('svg');
+          if (!svgEl) { reject(new Error('Invalid SVG: ' + file.name)); return; }
+
+          let w = parseFloat(svgEl.getAttribute('width'));
+          let h = parseFloat(svgEl.getAttribute('height'));
+          const vb = svgEl.getAttribute('viewBox');
+          if ((!w || !h) && vb) {
+            const parts = vb.split(/[\s,]+/);
+            w = parseFloat(parts[2]) || 300;
+            h = parseFloat(parts[3]) || 300;
+          }
+          w = w || 300;
+          h = h || 300;
+
+          svgEl.setAttribute('width', w);
+          svgEl.setAttribute('height', h);
+
+          const blob = new Blob([new XMLSerializer().serializeToString(svgEl)], { type: 'image/svg+xml' });
+          const url = URL.createObjectURL(blob);
+          const img = new Image();
+          img.onload = () => {
+            URL.revokeObjectURL(url);
+            resolve(img);
+          };
+          img.onerror = () => {
+            URL.revokeObjectURL(url);
+            reject(new Error('Failed to render SVG: ' + file.name));
+          };
+          img.src = url;
+        } else {
+          const img = new Image();
+          img.onload = () => resolve(img);
+          img.onerror = () => reject(new Error('Failed to load image: ' + file.name));
+          img.src = e.target.result;
+        }
       };
       reader.onerror = () => reject(new Error('Failed to read file: ' + file.name));
-      reader.readAsDataURL(file);
+      if (file.type === 'image/svg+xml' || file.name.toLowerCase().endsWith('.svg')) {
+        reader.readAsText(file);
+      } else {
+        reader.readAsDataURL(file);
+      }
     });
   }
 
@@ -40,8 +79,9 @@
       try {
         const pc = document.createElement('canvas');
         const pctx = pc.getContext('2d', { willReadFrequently: true });
-        pc.width = img.naturalWidth;
-        pc.height = img.naturalHeight;
+        pc.width = img.naturalWidth || img.width || 300;
+        pc.height = img.naturalHeight || img.height || 300;
+        if (pc.width === 0 || pc.height === 0) { reject(new Error('Image has zero dimensions')); return; }
         pctx.drawImage(img, 0, 0, pc.width, pc.height);
 
         const imageData = pctx.getImageData(0, 0, pc.width, pc.height);
@@ -176,7 +216,7 @@
     clearBtn.addEventListener('click', clearBatch);
 
     function addFiles(files) {
-      const images = files.filter(f => f.type.match('image.*'));
+      const images = files.filter(f => f.type.match('image.*') || f.name.toLowerCase().endsWith('.svg'));
       if (!images.length) return;
       batchFiles.push(...images);
       renderFileList();
